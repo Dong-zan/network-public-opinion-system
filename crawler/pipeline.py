@@ -6,7 +6,7 @@
 用法：
     from crawler.pipeline import run_once, save_articles
     articles = run_once()                        # 真实采集
-    articles = run_once(max_articles=50)          # 限制篇数
+    articles = run_once(max_articles=50)         # 限制篇数
     count = save_articles(articles)              # 仅保存 JSON
 """
 
