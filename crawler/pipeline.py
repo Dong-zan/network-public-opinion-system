@@ -1,7 +1,7 @@
 """
 数据管道模块
 ===========
-串联 采集 → 清洗 → 去重 → 输出JSON 全流程。
+串联 采集 → 清洗 → 去重 → 输出JSON → 推送后端 全流程。
 
 用法：
     from crawler.pipeline import run_once, save_articles
@@ -15,7 +15,9 @@ import os
 from datetime import datetime
 from typing import List, Optional
 
-from crawler.config import OUTPUT_DIR, MAX_ARTICLES_PER_RUN
+import requests
+
+from crawler.config import OUTPUT_DIR, MAX_ARTICLES_PER_RUN, BACKEND_URL
 from crawler.utils import setup_logger
 from crawler.crawler import fetch_all_news
 from crawler.cleaner import clean_and_dedup, Deduplicator
@@ -95,6 +97,34 @@ def save_articles(articles: List[dict], output_dir: str = None) -> int:
     return _save_to_json(articles, output_dir)
 
 
+def _upload_to_backend(articles: List[dict]) -> int:
+    """
+    推送新文章到后端 API。
+
+    Returns:
+        成功推送的条数
+    """
+    if not BACKEND_URL or not articles:
+        return 0
+
+    try:
+        resp = requests.post(
+            BACKEND_URL,
+            json=articles,
+            headers={"Content-Type": "application/json"},
+            timeout=30,
+        )
+        if resp.status_code == 200:
+            logger.info(f"后端推送成功: {len(articles)} 篇")
+            return len(articles)
+        else:
+            logger.warning(f"后端推送失败 ({resp.status_code}): {resp.text[:200]}")
+            return 0
+    except Exception as e:
+        logger.warning(f"后端推送异常: {e}")
+        return 0
+
+
 def run_once(
     max_articles: Optional[int] = None,
 ) -> List[dict]:
@@ -148,6 +178,14 @@ def run_once(
     finally:
         dedup.save()
         logger.info(f"去重状态: {dedup.stats()}")
+
+    # ================================================================
+    # Step 4: 推送到后端
+    # ================================================================
+    if articles:
+        logger.info("-" * 50)
+        logger.info("推送后端")
+        _upload_to_backend(articles)
 
     logger.info("=" * 50)
     return articles
