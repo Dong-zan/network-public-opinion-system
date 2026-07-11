@@ -1,0 +1,84 @@
+import os
+from dataclasses import dataclass, field
+
+from app.llm.base import LLMProviderConfigurationError
+
+
+def _positive_int(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _positive_float(name: str, default: float) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _boolean(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise LLMProviderConfigurationError(f"{name} must be true or false")
+
+
+@dataclass(frozen=True)
+class Settings:
+    service_name: str = field(default_factory=lambda: os.getenv("AI_SERVICE_NAME", "ai_service"))
+    qa_top_k: int = field(default_factory=lambda: _positive_int("AI_QA_TOP_K", 5))
+    article_max_chars: int = field(default_factory=lambda: _positive_int("AI_ARTICLE_MAX_CHARS", 1000))
+    llm_provider: str = field(default_factory=lambda: os.getenv("AI_LLM_PROVIDER", "fake"))
+    deepseek_api_key: str = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY", ""))
+    deepseek_base_url: str = field(
+        default_factory=lambda: os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+    )
+    deepseek_model: str = field(
+        default_factory=lambda: os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+    )
+    deepseek_thinking_enabled: bool = field(
+        default_factory=lambda: _boolean("DEEPSEEK_THINKING_ENABLED", False)
+    )
+    deepseek_timeout_seconds: float = field(
+        default_factory=lambda: _positive_float("DEEPSEEK_TIMEOUT_SECONDS", 45.0)
+    )
+    deepseek_max_tokens: int = field(
+        default_factory=lambda: _positive_int("DEEPSEEK_MAX_TOKENS", 1000)
+    )
+    deepseek_temperature: float = field(
+        default_factory=lambda: _float("DEEPSEEK_TEMPERATURE", 0.2)
+    )
+
+    def __post_init__(self) -> None:
+        provider = self.llm_provider.strip().lower()
+        if provider not in {"fake", "deepseek"}:
+            raise LLMProviderConfigurationError(
+                f"Unsupported AI_LLM_PROVIDER: {self.llm_provider!r}. Supported: fake, deepseek"
+            )
+        if provider == "deepseek" and not self.deepseek_api_key.strip():
+            raise LLMProviderConfigurationError(
+                "DEEPSEEK_API_KEY is required when AI_LLM_PROVIDER=deepseek"
+            )
+        if not self.deepseek_base_url.strip():
+            raise LLMProviderConfigurationError("DEEPSEEK_BASE_URL cannot be empty")
+        if not self.deepseek_model.strip():
+            raise LLMProviderConfigurationError("DEEPSEEK_MODEL cannot be empty")
+
+
+settings = Settings()
