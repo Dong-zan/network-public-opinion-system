@@ -4,22 +4,8 @@ from datetime import datetime
 from urllib.parse import urlparse
 from typing import Dict, List
 
+from .dependencies import get_sklearn_similarity_tools
 from .preprocess import merge_title_content, normalize_publish_time, normalize_source, normalize_url, tokenize
-
-try:
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.metrics.pairwise import cosine_similarity
-except ImportError:  # pragma: no cover - optional dependency fallback
-    TfidfVectorizer = None
-    cosine_similarity = None
-
-
-def _token_overlap_similarity(text_a: str, text_b: str) -> float:
-    tokens_a = set(tokenize(text_a))
-    tokens_b = set(tokenize(text_b))
-    if not tokens_a or not tokens_b:
-        return 0.0
-    return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
 
 
 def _parse_time(value: str) -> datetime | None:
@@ -104,32 +90,18 @@ def find_similar_news(
         return []
 
     texts = [merge_title_content(current_news)] + [merge_title_content(item) for item in candidates]
-    scored_items = []
+    TfidfVectorizer, cosine_similarity = get_sklearn_similarity_tools()
+    vectorizer = TfidfVectorizer(tokenizer=tokenize, token_pattern=None)
+    try:
+        matrix = vectorizer.fit_transform(texts)
+    except ValueError:
+        return []
 
-    if TfidfVectorizer and cosine_similarity:
-        vectorizer = TfidfVectorizer(tokenizer=tokenize, token_pattern=None)
-        try:
-            matrix = vectorizer.fit_transform(texts)
-            similarities = cosine_similarity(matrix[0:1], matrix[1:]).flatten()
-            scored_items = [
-                (item, _combine_similarity(float(score), current_news, item))
-                for item, score in zip(candidates, similarities)
-            ]
-        except ValueError:
-            scored_items = []
-
-    if not scored_items:
-        scored_items = [
-            (
-                item,
-                _combine_similarity(
-                    _token_overlap_similarity(texts[0], merge_title_content(item)),
-                    current_news,
-                    item,
-                ),
-            )
-            for item in candidates
-        ]
+    similarities = cosine_similarity(matrix[0:1], matrix[1:]).flatten()
+    scored_items = [
+        (item, _combine_similarity(float(score), current_news, item))
+        for item, score in zip(candidates, similarities)
+    ]
 
     similar = [
         (item.get("news_id"), score)

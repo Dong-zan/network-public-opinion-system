@@ -2,6 +2,7 @@
 
 from typing import Dict, List
 
+from .dependencies import check_required_dependencies
 from .heat_score import calculate_heat_score, judge_risk_level
 from .keyword_extract import extract_keywords
 from .lifecycle import predict_lifecycle
@@ -25,6 +26,8 @@ def analyze_news(news: Dict, all_news: List[Dict] | None = None, previous_heat_s
         "url": "https://example.com/news/1001",
     }
     """
+    check_required_dependencies()
+
     all_news = all_news or [news]
     processed = preprocess_news(news)
     text = processed["text"]

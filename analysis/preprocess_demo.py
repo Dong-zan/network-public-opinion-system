@@ -5,10 +5,12 @@ import sys
 from pathlib import Path
 
 if __package__:
+    from .dependencies import AnalysisDependencyError
     from .preprocess import preprocess_news
 else:
     project_root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(project_root))
+    from analysis.dependencies import AnalysisDependencyError
     from analysis.preprocess import preprocess_news
 
 
@@ -23,5 +25,9 @@ SAMPLE_NEWS = {
 
 
 if __name__ == "__main__":
-    result = preprocess_news(SAMPLE_NEWS)
+    try:
+        result = preprocess_news(SAMPLE_NEWS)
+    except AnalysisDependencyError as exc:
+        print(f"依赖检查失败：{exc}", file=sys.stderr)
+        sys.exit(1)
     print(json.dumps(result, ensure_ascii=False, indent=2))

@@ -5,10 +5,12 @@ import sys
 from pathlib import Path
 
 if __package__:
+    from .dependencies import AnalysisDependencyError
     from .analysis_pipeline import analyze_news_batch
 else:
     project_root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(project_root))
+    from analysis.dependencies import AnalysisDependencyError
     from analysis.analysis_pipeline import analyze_news_batch
 
 
@@ -49,5 +51,9 @@ SAMPLE_NEWS = [
 
 
 if __name__ == "__main__":
-    results = analyze_news_batch(SAMPLE_NEWS)
+    try:
+        results = analyze_news_batch(SAMPLE_NEWS)
+    except AnalysisDependencyError as exc:
+        print(f"依赖检查失败：{exc}", file=sys.stderr)
+        sys.exit(1)
     print(json.dumps(results, ensure_ascii=False, indent=2))

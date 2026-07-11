@@ -11,10 +11,7 @@ from html import unescape
 import re
 from typing import Any, Dict, List
 
-try:
-    import jieba
-except ImportError:  # pragma: no cover - optional dependency fallback
-    jieba = None
+from .dependencies import get_jieba
 
 
 STOPWORDS = {
@@ -146,14 +143,7 @@ def tokenize(text: str) -> List[str]:
     if not cleaned:
         return []
 
-    if jieba:
-        raw_tokens = jieba.lcut(cleaned)
-    else:
-        raw_tokens = []
-        for word in DOMAIN_WORDS:
-            if word in cleaned:
-                raw_tokens.append(word)
-        raw_tokens.extend(re.findall(r"[a-zA-Z0-9]+", cleaned))
+    raw_tokens = get_jieba().lcut(cleaned)
 
     tokens = []
     for token in raw_tokens:
