@@ -10,9 +10,13 @@ def calculate_heat_score(keywords: List[str], sentiment: Dict[str, float], simil
     similar_score = min(len(similar_news) * 25, 100)
     sensitive_hits = sum(1 for word in keywords if any(sensitive in word for sensitive in SENSITIVE_WORDS))
     keyword_score = min(sensitive_hits * 25, 100)
-    negative_score = sentiment.get("negative", 0) * 100
+    positive = sentiment.get("positive", 0)
+    negative = sentiment.get("negative", 0)
+    dominant_emotion = max(positive, negative)
+    secondary_emotion = min(positive, negative)
+    sentiment_score = min(dominant_emotion * 100 + secondary_emotion * 40, 100)
 
-    heat_score = similar_score * 0.5 + keyword_score * 0.2 + negative_score * 0.3
+    heat_score = similar_score * 0.45 + keyword_score * 0.25 + sentiment_score * 0.3
     return int(round(max(0, min(heat_score, 100))))
 
 
