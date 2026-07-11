@@ -12,7 +12,6 @@
 
 import json
 import os
-import hashlib
 from datetime import datetime
 from typing import List, Optional
 
@@ -21,16 +20,6 @@ from crawler.utils import setup_logger
 from crawler.crawler import fetch_all_news
 from crawler.cleaner import clean_and_dedup, Deduplicator
 logger = setup_logger(__name__)
-
-
-# ============================================================
-# 辅助：内容哈希
-# ============================================================
-
-def _content_hash(title: str, content: str) -> str:
-    """计算 标题 + 正文 的 MD5，降低仅开头相似的误判"""
-    hash_text = f"{title}|{content}"
-    return hashlib.md5(hash_text.encode("utf-8")).hexdigest()
 
 
 # ============================================================
@@ -66,22 +55,14 @@ def _save_to_json(articles: List[dict], output_dir: str = None) -> int:
         except (json.JSONDecodeError, FileNotFoundError):
             existing = []
 
-    # 构建已有数据索引：URL + 内容哈希
+    # 已有数据索引：URL
     existing_urls = {item.get("url", "") for item in existing}
-    existing_hashes = {
-        _content_hash(item.get("title", ""), item.get("content", ""))
-        for item in existing
-        if item.get("content")
-    }
 
-    # 过滤：URL 或内容哈希匹配的都算重复
+    # 过滤：URL 相同则跳过
     new_items: List[dict] = []
     for a in articles:
         url = a.get("url", "")
-        h = _content_hash(a.get("title", ""), a.get("content", ""))
         if url and url in existing_urls:
-            continue
-        if h and h in existing_hashes:
             continue
         new_items.append(a)
 

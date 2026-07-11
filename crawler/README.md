@@ -28,6 +28,7 @@ crawler/
 ├── cleaner.py          # 文本清洗 + URL 去重 + 质量过滤
 ├── pipeline.py         # 管道编排（采集→清洗→去重→输出JSON）
 ├── run.py              # 命令行入口（单次/持续/限制篇数）
+├── utils.py             # 工具函数（日志/时间解析/请求头）
 ├── requirements.txt    # Python 依赖清单
 └── README.md           # 本开发文档
 ```
