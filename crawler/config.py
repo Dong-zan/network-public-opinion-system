@@ -66,14 +66,46 @@ NEWS_SOURCES = [
             "article_time": "div.content_left_time",
         },
     },
+    {
+        "name": "sina",                     # 内部标识
+        "label": "新浪新闻",                  # 显示名称
+        "base_url": "https://news.sina.com.cn",
+        "encoding": "utf-8",
+        "article_path": "/doc-",            # 新浪文章路径特征（新版 URL 格式）
+        "list_urls": [
+            "https://news.sina.com.cn/world/",
+            "https://finance.sina.com.cn/",
+            "https://tech.sina.com.cn/",
+            "https://sports.sina.com.cn/",
+        ],
+        "selectors": {
+            "list_link": "a[href*='/doc-']",
+            # 新浪文章普遍使用 h1.main-title，h1 作为降级
+            "article_title": "h1.main-title, h1",
+            # div.article 为主容器，div#article 见于部分国际频道
+            "article_content": "div.article, div#article",
+            # span.date 是最常见的发布时间容器
+            "article_time": "span.date, div.date-source span.date, meta[name=\"publishdate\"]",
+            # data-sudaclick 是新浪特有的来源标注属性
+            "article_author": "[data-sudaclick=\"content_media_p\"], meta[name=\"og:author\"], meta[name=\"article:author\"]",
+        },
+    },
+    {
+        "type": "weibo",                    # 社交平台，走热搜→搜索→帖子 流程
+        "name": "weibo",                    # 内部标识
+        "label": "微博",                     # 显示名称
+        "hot_search_url": "https://weibo.com/ajax/side/hotSearch",
+        "topics_per_run": 40,               # 每轮取前 N 个热搜词
+        "posts_per_topic": 1,               # 每个热搜词搜几条帖子
+    },
 ]
 
 # ============================================================
 # 采集参数
 # ============================================================
 
-# 每次运行最多采集的文章数
-MAX_ARTICLES_PER_RUN = 100
+# 每次运行最多采集的文章数（新闻部分，微博另计）
+MAX_ARTICLES_PER_RUN = 120
 
 # HTTP 请求超时（秒）
 REQUEST_TIMEOUT = 15
@@ -94,9 +126,6 @@ OUTPUT_DIR = "output"
 
 # 去重记录文件路径
 DEDUP_FILE = "data/seen_urls.json"
-
-# 内容哈希：取正文前 N 个字符计算 MD5，用于跨站转载去重
-CONTENT_HASH_PREFIX_LEN = 200
 
 # ============================================================
 # 日志配置

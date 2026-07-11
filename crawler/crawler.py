@@ -1,14 +1,14 @@
 """
 新闻采集模块
 ===========
-核心采集逻辑：支持人民网、新华网、中新网多源采集
-使用 requests + BeautifulSoup(lxml) 从多个新闻网站采集原始文章数据。
+核心采集逻辑：支持人民网、新华网、中新网、新浪新闻、微博多源采集
+新闻网站使用 requests + BeautifulSoup(lxml)，微博使用热搜API + crawl4weibo。
 
 职责边界：
   crawler.py = HTTP 请求 + HTML 解析 + 字段提取（不做清洗）
   cleaner.py = 文本清洗 + 日期解析 + 去重
 
-输出统一字段：{title, content, source, url, publish_time}
+输出统一字段（15字段）：{title, content, source, url, publish_time, platform, author, account_id, account_name, account_type, is_official, crawl_time, repost_count, comment_count, like_count, reference_urls}
 """
 
 import os
@@ -41,6 +41,9 @@ ARTICLE_URL_BLOCKLIST = [
     "/special/", "/zt/", "slide", "app.people", "dangjian",
     "www.people.com.cn",   # 主站文章几乎全404，只采各频道子域名
     "#liuyan",              # 锚点重复，已在列表页有原始链接
+    # 新浪特有
+    "lottery",              # 彩票频道
+    "sports.sina.com.cn/l/",  # 体育专题/列表页，非文章
 ]
 
 
@@ -166,8 +169,7 @@ def fetch_article(url: str, source: dict, session: requests.Session) -> Optional
         session: 复用的 requests.Session
 
     Returns:
-        {title, content, publish_time, source, url}
-        失败返回 None。
+        完整15字段 dict，失败返回 None。
     """
     selectors = source["selectors"]
 
@@ -220,18 +222,172 @@ def fetch_article(url: str, source: dict, session: requests.Session) -> Optional
     else:
         publish_time = ""
 
+    crawl_time = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    # 尝试提取作者/来源
+    author = ""
+    author_sel = selectors.get("article_author", "")
+    if author_sel:
+        author_el = _safe_select(soup, author_sel)
+        if author_el:
+            author = author_el.get_text(strip=True)
+
+    # 判断是否官媒（人民网、新华网、中新网为官方媒体）
+    is_official = source.get("is_official", source["name"] in ("people", "xinhua", "chinanews"))
+
     return {
         "title": title,
         "content": content,
         "source": source["label"],
         "url": url,
         "publish_time": publish_time,
+        "platform": "新闻网站",
+        "author": author,
+        "account_id": "",
+        "account_name": "",
+        "account_type": "媒体",
+        "is_official": is_official,
+        "crawl_time": crawl_time,
+        "repost_count": 0,
+        "comment_count": 0,
+        "like_count": 0,
+        "reference_urls": [],
     }
 
 
 # ============================================================
 # 批量采集
 # ============================================================
+
+# ============================================================
+# 微博热搜采集
+# ============================================================
+
+def _fetch_weibo_posts(source: dict) -> List[dict]:
+    """
+    微博热搜采集流程：
+      1. 调用热搜 API 获取实时热搜榜
+      2. 对每个热搜词搜索相关帖子
+      3. 返回统一15字段格式
+
+    Args:
+        source: type="weibo" 的配置项
+
+    Returns:
+        原始文章 dict 列表（15字段，content 已是纯文本）
+    """
+    from crawl4weibo import WeiboClient
+
+    client = WeiboClient()
+    session = client.session
+
+    topics_per = source.get("topics_per_run", 10)
+    posts_per = source.get("posts_per_topic", 3)
+    articles: List[dict] = []
+
+    # ---- Step 1: 获取实时热搜榜 ----
+    logger.info(f"  正在获取微博热搜榜...")
+    try:
+        resp = session.get(
+            source["hot_search_url"],
+            timeout=REQUEST_TIMEOUT,
+            headers={
+                "Referer": "https://weibo.com/",
+                "X-Requested-With": "XMLHttpRequest",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        logger.warning(f"  微博热搜获取失败: {e}")
+        return []
+
+    realtime = data.get("data", {}).get("realtime", [])
+    topics = realtime[:topics_per]
+    logger.info(f"  热搜榜获取成功: {len(topics)} 个热搜词")
+
+    # ---- Step 2: 逐热搜词搜索帖子 ----
+    crawl_time = time.strftime("%Y-%m-%d %H:%M:%S")
+    user_cache = {}  # 缓存用户信息，避免重复查询
+
+    for rank, topic in enumerate(topics, 1):
+        word = topic.get("word", "")
+        if not word:
+            continue
+
+        logger.info(f"  [{rank}/{len(topics)}] 搜索帖子: {word[:30]}")
+        try:
+            results = client.search_posts(word, page=1)
+            if not results or not results[0]:
+                continue
+
+            # 按正文长度排序，优先取内容较丰富的帖子
+            sorted_posts = sorted(results[0], key=lambda p: len(p.text or ""), reverse=True)
+            for post in sorted_posts[:posts_per]:
+                text = post.text.strip()
+                title = text.split("\n")[0][:80]
+
+                raw_time = str(post.created_at) if post.created_at else ""
+                if "+" in raw_time:
+                    raw_time = raw_time.split("+")[0]
+
+                # --- 查用户认证信息 ---
+                author = ""
+                account_name = ""
+                account_type = "普通用户"
+                is_official = False
+
+                uid = str(post.user_id) if post.user_id else ""
+                if uid and uid not in user_cache:
+                    try:
+                        user = client.get_user_by_uid(uid)
+                        user_cache[uid] = user
+                    except Exception:
+                        user_cache[uid] = None
+                user = user_cache.get(uid)
+
+                if user:
+                    author = user.screen_name or ""
+                    account_name = user.screen_name or ""
+                    verified_reason = str(user.verified_reason or "")
+                    if user.verified:
+                        if any(kw in verified_reason for kw in
+                               ["媒体", "新闻", "报社", "新闻网", "TV", "广播", "记者", "日报", "周刊"]):
+                            account_type = "媒体"
+                        elif any(kw in verified_reason for kw in
+                                 ["政府", "公安", "法院", "检察院", "官方", "中国", "国家",
+                                  "部", "委", "局", "办", "发布", "消防", "军队", "大使馆"]):
+                            account_type = "官方机构"
+                        else:
+                            account_type = "大V"
+                    is_official = account_type in ("媒体", "官方机构")
+
+                articles.append({
+                    "title": title,
+                    "content": text,
+                    "source": source["label"],
+                    "url": f"https://weibo.com/{post.id}",
+                    "publish_time": raw_time,
+                    "platform": "微博",
+                    "author": author,
+                    "account_id": uid,
+                    "account_name": account_name,
+                    "account_type": account_type,
+                    "is_official": is_official,
+                    "crawl_time": crawl_time,
+                    "repost_count": post.reposts_count or 0,
+                    "comment_count": post.comments_count or 0,
+                    "like_count": post.attitudes_count or 0,
+                    "reference_urls": [],
+                })
+        except Exception as e:
+            logger.warning(f"    搜索 '{word}' 失败: {e}")
+            continue
+
+        time.sleep(1.0)
+
+    return articles
+
 
 def fetch_all_news(max_articles: Optional[int] = None,
                    seen_urls: set = None) -> List[dict]:
@@ -248,13 +404,36 @@ def fetch_all_news(max_articles: Optional[int] = None,
     """
     target = max_articles if max_articles is not None else MAX_ARTICLES_PER_RUN
     session = _make_session()
-    known_urls = seen_urls if seen_urls is not None else set()
+    known_urls = set(seen_urls) if seen_urls is not None else set()
+
+    # 分离新闻源和微博
+    news_sources = [s for s in NEWS_SOURCES if s.get("type") != "weibo"]
+    weibo_sources = [s for s in NEWS_SOURCES if s.get("type") == "weibo"]
+
+    articles: List[dict] = []
 
     # ================================================================
-    # 第一遍：收集所有源的列表页链接（轮询混排，各源公平参与）
+    # 微博：热搜 → 搜索 → 帖子（先执行，不占新闻配额）
+    # ================================================================
+    weibo_count = 0
+    for src in weibo_sources:
+        logger.info(f"微博热搜采集: {src['label']}")
+        weibo_posts = _fetch_weibo_posts(src)
+        # 过滤已采集
+        fresh = []
+        for a in weibo_posts:
+            if a["url"] not in known_urls:
+                fresh.append(a)
+                known_urls.add(a["url"])
+        articles.extend(fresh)
+        weibo_count += len(fresh)
+        logger.info(f"  {src['label']} → {len(fresh)} 条新帖子")
+
+    # ================================================================
+    # 第一遍：收集所有新闻源的列表页链接（轮询混排，各源公平参与）
     # ================================================================
     source_urls: List[List[str]] = []
-    for source in NEWS_SOURCES:
+    for source in news_sources:
         logger.info(f"扫描列表页: {source['label']}")
         urls = fetch_news_list(source, session)
         logger.info(f"  {source['label']} → {len(urls)} 个链接")
@@ -274,23 +453,23 @@ def fetch_all_news(max_articles: Optional[int] = None,
     if skipped_known:
         logger.info(f"跳过已采集 {skipped_known} 个链接，剩余 {len(fresh_urls)} 个新链接")
 
-    logger.info(f"全部 {len(NEWS_SOURCES)} 个源，目标采集 {target} 篇")
+    logger.info(f"全部 {len(news_sources)} 个新闻源 + {len(weibo_sources)} 个社交源，"
+                 f"新闻目标 {target} 篇")
 
     # ================================================================
-    # 第二遍：遍历新链接，逐个采集
+    # 第二遍：遍历新链接，逐个采集（新闻源，不含微博已采部分）
     # ================================================================
-    articles: List[dict] = []
     total_skipped = 0
 
     for url in fresh_urls:
-        if len(articles) >= target:
+        if len(articles) - weibo_count >= target:
             break
 
         src = _find_source_for_url(url)
         article = fetch_article(url, src, session)
         if article:
             articles.append(article)
-            logger.info(f"    [{len(articles)}/{target}] ✓ "
+            logger.info(f"    [{len(articles) - weibo_count}/{target}] ✓ "
                         f"{article['title'][:40]} [{src['label']}]")
         else:
             total_skipped += 1
@@ -299,14 +478,28 @@ def fetch_all_news(max_articles: Optional[int] = None,
 
         time.sleep(REQUEST_DELAY)
 
-    logger.info(f"采集完成: {len(articles)}/{target} 篇，"
-                 f"共尝试 {len(articles) + total_skipped}，跳过 {total_skipped}")
+    news_count = len(articles) - weibo_count
+    logger.info(f"采集完成: 新闻 {news_count}/{target} 篇 + 微博 {weibo_count} 篇 = {len(articles)} 篇，"
+                 f"跳过 {total_skipped}")
     return articles
 
 
 def _find_source_for_url(url: str) -> dict:
-    """根据 URL 找到对应的新闻源配置"""
+    """根据 URL 找到对应的新闻源配置（仅新闻类型源）"""
+    from urllib.parse import urlparse
+
+    url_domain = urlparse(url).netloc.lower()
+
     for src in NEWS_SOURCES:
-        if src["base_url"] in url or src["name"] in url:
+        if src.get("type") == "weibo":
+            continue
+        src_domain = urlparse(src.get("base_url", "")).netloc.lower()
+        # 用域名匹配（忽略协议差异），或用 source name 兜底
+        if (src_domain and src_domain in url_domain) or src["name"] in url:
             return src
-    return NEWS_SOURCES[0]  # 兜底
+
+    # 兜底：返回第一个新闻源
+    for src in NEWS_SOURCES:
+        if src.get("type") != "weibo":
+            return src
+    return NEWS_SOURCES[0]

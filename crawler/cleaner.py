@@ -8,7 +8,7 @@
   原始 publish_time  ──► parse_datetime() ──► YYYY-MM-DD HH:MM:SS
 
 去重逻辑：
-  URL 精确匹配 OR 正文前 N 字符 MD5 匹配 → 判为重复
+  URL 精确匹配 → 判为重复（不再使用内容哈希，保留不同来源的相似内容）
 """
 
 import json
@@ -18,10 +18,7 @@ import hashlib
 from typing import List, Set
 from bs4 import BeautifulSoup
 
-from crawler.config import (
-    DEDUP_FILE,
-    CONTENT_HASH_PREFIX_LEN,
-)
+from crawler.config import DEDUP_FILE
 from crawler.utils import (
     setup_logger,
     parse_datetime,
@@ -80,11 +77,10 @@ def clean_article(article: dict) -> dict | None:
     返回 None 表示文章不合规，应丢弃。
 
     Args:
-        article: crawler 输出的原始 dict
-            {title, content(原始HTML), publish_time(原始文本), source, url}
+        article: crawler 输出的原始 dict（15字段）
 
     Returns:
-        清洗后的 dict，或 None（文章无效）。
+        清洗后的 dict（15字段透传），或 None（文章无效）。
     """
     # --- 清洗正文 ---
     raw_content = article.get("content", "")
@@ -122,8 +118,10 @@ def clean_article(article: dict) -> dict | None:
     if not publish_time:
         return None
 
-    # 规则 3: 正文不能太短（最少 50 个字符）
-    if len(text.strip()) < 50:
+    # 规则 3: 正文不能太短
+    # 微博阈值 30 字（过滤纯表情/无意义帖）；新闻网站至少 50 字
+    min_len = 30 if article.get("source") == "微博" else 50
+    if len(text.strip()) < min_len:
         return None
 
     # 规则 4: 过滤专题/栏目页（"更多+" 出现超过 3 次说明是列表页）
@@ -136,6 +134,17 @@ def clean_article(article: dict) -> dict | None:
         "source": article.get("source", ""),
         "url": article.get("url", ""),
         "publish_time": publish_time,
+        "platform": article.get("platform", ""),
+        "author": article.get("author", ""),
+        "account_id": article.get("account_id", ""),
+        "account_name": article.get("account_name", ""),
+        "account_type": article.get("account_type", ""),
+        "is_official": article.get("is_official", False),
+        "crawl_time": article.get("crawl_time", ""),
+        "repost_count": article.get("repost_count", 0),
+        "comment_count": article.get("comment_count", 0),
+        "like_count": article.get("like_count", 0),
+        "reference_urls": article.get("reference_urls", []),
     }
 
 
@@ -158,21 +167,19 @@ def _truncate_copyright(text: str) -> str:
 
 class Deduplicator:
     """
-    双层去重器：URL 匹配 + 内容哈希匹配。
+    URL 去重器：记录已采集的 URL，避免重复下载。
 
     使用方式：
         dedup = Deduplicator()
-        if not dedup.is_duplicate(url, content):
-            dedup.mark_seen(url, content)
+        if url not in dedup.seen_urls:
+            dedup.mark_seen(url)
             # 保存这篇
         dedup.save()  # 结束时持久化
     """
 
-    def __init__(self, state_file: str = None, hash_prefix_len: int = None):
+    def __init__(self, state_file: str = None):
         self.state_file = state_file or DEDUP_FILE
-        self.hash_prefix_len = hash_prefix_len or CONTENT_HASH_PREFIX_LEN
         self.seen_urls: Set[str] = set()
-        self.seen_hashes: Set[str] = set()
         self._load()
 
     # --- 哈希计算 ---
@@ -288,14 +295,14 @@ def clean_and_dedup(
             logger.info(f"  丢弃无效文章: {raw.get('title', '')[:40]}")
             continue
 
-        # Step 2: 去重
-        if dedup.is_duplicate(item["url"], item["title"], item["content"]):
+        # Step 2: URL 去重（同一 URL 不重复采集）
+        if item["url"] in getattr(dedup, "seen_urls", set()):
             skipped_dup += 1
             logger.info(f"  重复跳过: {item['title'][:40]}")
             continue
 
         # Step 3: 记录 + 保留
-        dedup.mark_seen(item["url"], item["title"], item["content"])
+        dedup.mark_seen(item["url"])
         result.append(item)
 
     logger.info(f"清洗完成: 保留 {len(result)} 篇, "
