@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field
+from typing import Any
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class Article(BaseModel):
@@ -20,12 +22,27 @@ class Sentiment(BaseModel):
     negative: float | None = None
 
 
+class AnalysisHistoryPoint(BaseModel):
+    time: str | None = None
+    heat: float | None = None
+    article_count: int | None = None
+    positive: float | None = None
+    neutral: float | None = None
+    negative: float | None = None
+
+
 class EventAnalysis(BaseModel):
     keywords: list[str] = Field(default_factory=list)
     sentiment: Sentiment | None = None
     heat: float | None = None
     stage: str | None = None
     risk_level: str | None = None
+    history: list[AnalysisHistoryPoint] = Field(default_factory=list)
+
+    @field_validator("history", mode="before")
+    @classmethod
+    def normalize_empty_history(cls, value: Any) -> Any:
+        return [] if value is None else value
 
 
 class EventContext(BaseModel):

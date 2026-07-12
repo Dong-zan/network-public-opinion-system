@@ -1,6 +1,6 @@
 from app.llm.base import LLMProvider
 from app.llm.fake_provider import FakeLLMProvider
-from app.llm.prompts import PromptBundle
+from app.llm.prompt_types import PromptBundle
 from app.schemas.event import EventContext
 from app.services.qa_service import QAService
 

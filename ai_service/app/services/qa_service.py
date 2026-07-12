@@ -6,7 +6,8 @@ from functools import lru_cache
 from app.core.config import settings
 from app.llm.base import LLMProvider, LLMProviderError, LLMProviderUnavailableError
 from app.llm.factory import create_llm_provider
-from app.llm.prompts import PromptBundle, build_qa_prompt
+from app.llm.prompt_types import PromptBundle
+from app.llm.prompts import build_qa_prompt
 from app.schemas.event import Article, EventContext, Sentiment
 
 

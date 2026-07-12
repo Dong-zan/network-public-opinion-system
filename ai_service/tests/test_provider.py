@@ -3,7 +3,7 @@ import pytest
 from app.core.config import Settings
 from app.llm.base import LLMProvider, LLMProviderError
 from app.llm.factory import UnsupportedLLMProviderError, create_llm_provider
-from app.llm.prompts import PromptBundle
+from app.llm.prompt_types import PromptBundle
 from app.main import app
 from app.services.qa_service import QAService, get_qa_service
 

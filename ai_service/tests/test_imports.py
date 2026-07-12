@@ -17,6 +17,22 @@ def test_settings_import_and_creation() -> None:
     settings = Settings(llm_provider="fake")
 
     assert settings.llm_provider == "fake"
+    assert settings.report_top_k == 5
+    assert settings.report_article_max_chars == 1000
+
+
+def test_report_settings_are_independent_from_qa(monkeypatch) -> None:
+    monkeypatch.setenv("AI_QA_TOP_K", "2")
+    monkeypatch.setenv("AI_REPORT_TOP_K", "7")
+    monkeypatch.setenv("AI_ARTICLE_MAX_CHARS", "300")
+    monkeypatch.setenv("AI_REPORT_ARTICLE_MAX_CHARS", "900")
+
+    settings = Settings(llm_provider="fake")
+
+    assert settings.qa_top_k == 2
+    assert settings.report_top_k == 7
+    assert settings.article_max_chars == 300
+    assert settings.report_article_max_chars == 900
 
 
 def test_fake_provider_creation_after_settings_import() -> None:

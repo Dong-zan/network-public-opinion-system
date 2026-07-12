@@ -1,5 +1,6 @@
 from app.llm.base import LLMProvider
-from app.llm.prompts import PromptBundle, build_qa_prompt
+from app.llm.prompt_types import PromptBundle
+from app.llm.prompts import build_qa_prompt
 from app.schemas.event import EventContext
 from app.services.qa_service import QAService
 
