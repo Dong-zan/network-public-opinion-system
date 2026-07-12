@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from app.llm.prompts import PromptBundle
+from app.llm.prompt_types import PromptBundle
 
 
 class LLMProviderError(RuntimeError):

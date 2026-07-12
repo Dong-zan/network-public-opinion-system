@@ -1,6 +1,6 @@
 import json
-from dataclasses import dataclass
 
+from app.llm.prompt_types import PromptBundle
 from app.schemas.event import Article, EventContext
 
 
@@ -23,12 +23,6 @@ event.summary 只是事件背景，不是独立新闻证据；存在文章时，
 最终答案不得暴露内部 Schema 或实现字段名，包括 is_official、account_type、source_type、event.summary、provider_name、article_max_chars、top_k、PromptBundle 和 EventContext。
 最终只输出用户可见答案，不得输出内部推理过程。
 证据不足时必须明确说明“当前信息不足”。"""
-
-
-@dataclass(frozen=True)
-class PromptBundle:
-    system_prompt: str
-    user_prompt: str
 
 
 def build_qa_prompt(

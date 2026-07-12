@@ -1,5 +1,5 @@
 from app.llm.base import LLMProvider
-from app.llm.prompts import PromptBundle
+from app.llm.prompt_types import PromptBundle
 
 
 class FakeLLMProvider(LLMProvider):

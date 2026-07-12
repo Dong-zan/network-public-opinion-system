@@ -44,6 +44,10 @@ class Settings:
     service_name: str = field(default_factory=lambda: os.getenv("AI_SERVICE_NAME", "ai_service"))
     qa_top_k: int = field(default_factory=lambda: _positive_int("AI_QA_TOP_K", 5))
     article_max_chars: int = field(default_factory=lambda: _positive_int("AI_ARTICLE_MAX_CHARS", 1000))
+    report_top_k: int = field(default_factory=lambda: _positive_int("AI_REPORT_TOP_K", 5))
+    report_article_max_chars: int = field(
+        default_factory=lambda: _positive_int("AI_REPORT_ARTICLE_MAX_CHARS", 1000)
+    )
     llm_provider: str = field(default_factory=lambda: os.getenv("AI_LLM_PROVIDER", "fake"))
     deepseek_api_key: str = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY", ""))
     deepseek_base_url: str = field(

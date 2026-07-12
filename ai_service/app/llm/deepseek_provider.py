@@ -10,7 +10,7 @@ from app.llm.base import (
     LLMProviderError,
     LLMProviderUnavailableError,
 )
-from app.llm.prompts import PromptBundle
+from app.llm.prompt_types import PromptBundle
 
 if TYPE_CHECKING:
     from app.core.config import Settings
