@@ -48,6 +48,15 @@ class Settings:
     report_article_max_chars: int = field(
         default_factory=lambda: _positive_int("AI_REPORT_ARTICLE_MAX_CHARS", 1000)
     )
+    verify_max_candidates: int = field(
+        default_factory=lambda: _positive_int("AI_VERIFY_MAX_CANDIDATES", 50)
+    )
+    verify_max_sentences_per_article: int = field(
+        default_factory=lambda: _positive_int("AI_VERIFY_MAX_SENTENCES_PER_ARTICLE", 100)
+    )
+    verify_article_max_chars: int = field(
+        default_factory=lambda: _positive_int("AI_VERIFY_ARTICLE_MAX_CHARS", 5000)
+    )
     llm_provider: str = field(default_factory=lambda: os.getenv("AI_LLM_PROVIDER", "fake"))
     deepseek_api_key: str = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY", ""))
     deepseek_base_url: str = field(
@@ -63,7 +72,7 @@ class Settings:
         default_factory=lambda: _positive_float("DEEPSEEK_TIMEOUT_SECONDS", 45.0)
     )
     deepseek_max_tokens: int = field(
-        default_factory=lambda: _positive_int("DEEPSEEK_MAX_TOKENS", 1000)
+        default_factory=lambda: _positive_int("DEEPSEEK_MAX_TOKENS", 3000)
     )
     deepseek_temperature: float = field(
         default_factory=lambda: _float("DEEPSEEK_TEMPERATURE", 0.2)
