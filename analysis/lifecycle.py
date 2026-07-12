@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Dict, List
 
-from .preprocess import normalize_publish_time, normalize_source
+from .preprocess import get_effective_time, normalize_publish_time, normalize_source
 
 
 def _parse_time(value: str) -> datetime | None:
@@ -27,7 +27,7 @@ def _related_news(current_news: Dict, all_news: List[Dict], similar_news: List[i
 
 
 def _time_span_hours(news_items: List[Dict]) -> float:
-    times = [_parse_time(item.get("publish_time", "")) for item in news_items]
+    times = [_parse_time(get_effective_time(item)) for item in news_items]
     times = [value for value in times if value is not None]
     if len(times) < 2:
         return 0.0

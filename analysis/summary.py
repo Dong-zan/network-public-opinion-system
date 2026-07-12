@@ -3,7 +3,8 @@
 import re
 from typing import Dict, List
 
-from .preprocess import clean_text, normalize_publish_time, normalize_source
+from .lexicon import load_sensitive_words
+from .preprocess import clean_text, normalize_publish_time, normalize_source, tokenize
 
 
 def _split_sentences(text: str) -> List[str]:
@@ -31,6 +32,55 @@ def _source_phrase(source: str) -> str:
     return f"{source}发布"
 
 
+def _overlap_ratio(text_a: str, text_b: str) -> float:
+    tokens_a = set(tokenize(text_a))
+    tokens_b = set(tokenize(text_b))
+    if not tokens_a or not tokens_b:
+        return 0.0
+    return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
+
+
+def _sentence_score(sentence: str, title: str, keywords: List[str]) -> float:
+    tokens = tokenize(sentence)
+    if not tokens:
+        return 0.0
+
+    keyword_hits = sum(1 for word in keywords if word and word in sentence)
+    sensitive_hits = sum(1 for word in load_sensitive_words() if word in sentence)
+    title_overlap = _overlap_ratio(sentence, title)
+    length_score = min(len(sentence) / 60, 1.0)
+
+    if title and sentence in title:
+        title_overlap = 1.0
+
+    duplicate_penalty = 0.45 if title_overlap >= 0.85 else 0.0
+    return keyword_hits * 2.0 + sensitive_hits * 1.2 + title_overlap * 0.8 + length_score - duplicate_penalty
+
+
+def _select_main_sentences(content: str, title: str, keywords: List[str], max_count: int = 2) -> List[str]:
+    sentences = _split_sentences(content)
+    if not sentences:
+        return []
+
+    scored = []
+    for index, sentence in enumerate(sentences):
+        if title and _overlap_ratio(sentence, title) >= 0.9:
+            continue
+        scored.append((_sentence_score(sentence, title, keywords), index, sentence))
+
+    if not scored:
+        return [sentences[0]]
+
+    selected = sorted(scored, key=lambda item: (-item[0], item[1]))[:max_count]
+    return [sentence for _, _, sentence in sorted(selected, key=lambda item: item[1])]
+
+
+def _build_keyword_suffix(keywords: List[str]) -> str:
+    if not keywords:
+        return ""
+    return f"关键词：{'、'.join(keywords[:5])}"
+
+
 def generate_summary(
     news: Dict,
     keywords: List[str] | None = None,
@@ -39,18 +89,14 @@ def generate_summary(
     """
     Generate a concise event summary for one news item.
 
-    The summary is intentionally rule-based so the backend can use it without
-    requiring an external large-model service. It combines title, source,
-    publish time, first content sentence and key terms.
+    Candidate content sentences are ranked by keyword density, sensitive-word
+    hits, title overlap and readable length.
     """
     title = clean_text(news.get("title", "")).strip(" ，。,.")
     content = clean_text(news.get("content", ""))
     source = normalize_source(news.get("source", ""))
     publish_time = normalize_publish_time(news.get("publish_time", ""))
     keywords = [word for word in (keywords or []) if word]
-
-    sentences = _split_sentences(content)
-    main_sentence = sentences[0] if sentences else ""
 
     parts = []
     if publish_time:
@@ -60,11 +106,22 @@ def generate_summary(
         parts.append(source_phrase)
     if title:
         parts.append(title)
-    if main_sentence and main_sentence not in title:
-        parts.append(main_sentence)
 
-    summary = "，".join(parts)
-    if keywords:
-        summary = f"{summary}。关键词：{'、'.join(keywords[:5])}" if summary else f"关键词：{'、'.join(keywords[:5])}"
+    for sentence in _select_main_sentences(content, title, keywords):
+        if sentence and sentence not in parts:
+            parts.append(sentence)
 
-    return _trim_text(summary or "暂无摘要", max_length)
+    body = "，".join(parts)
+    keyword_suffix = _build_keyword_suffix(keywords)
+    if not body and not keyword_suffix:
+        return "暂无摘要"
+    if not keyword_suffix:
+        return _trim_text(body, max_length)
+
+    suffix = f"。{keyword_suffix}" if body else keyword_suffix
+    body_budget = max_length - len(suffix)
+    if body_budget <= 0:
+        return _trim_text(keyword_suffix, max_length)
+
+    trimmed_body = _trim_text(body, body_budget).rstrip("，。,. ")
+    return f"{trimmed_body}{suffix}" if trimmed_body else keyword_suffix

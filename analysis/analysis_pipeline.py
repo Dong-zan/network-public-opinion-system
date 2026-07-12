@@ -36,7 +36,7 @@ def analyze_news(news: Dict, all_news: List[Dict] | None = None, previous_heat_s
     summary = generate_summary(news, keywords)
     sentiment = analyze_sentiment(text)
     similar_news = find_similar_news(news, all_news)
-    heat_score = calculate_heat_score(keywords, sentiment, similar_news)
+    heat_score = calculate_heat_score(keywords, sentiment, similar_news, news)
     risk_level = judge_risk_level(heat_score, sentiment)
     stage = predict_lifecycle(news, all_news, heat_score, similar_news, previous_heat_score)
 

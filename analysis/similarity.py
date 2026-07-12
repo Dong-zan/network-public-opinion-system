@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 from typing import Dict, List
 
 from .dependencies import get_sklearn_similarity_tools
-from .preprocess import merge_title_content, normalize_publish_time, normalize_source, normalize_url, tokenize
+from .preprocess import get_effective_time, merge_title_content, normalize_publish_time, normalize_source, normalize_url, tokenize
 
 
 def _parse_time(value: str) -> datetime | None:
@@ -19,8 +19,8 @@ def _parse_time(value: str) -> datetime | None:
 
 
 def _time_similarity(news_a: Dict, news_b: Dict) -> float:
-    time_a = _parse_time(news_a.get("publish_time", ""))
-    time_b = _parse_time(news_b.get("publish_time", ""))
+    time_a = _parse_time(get_effective_time(news_a))
+    time_b = _parse_time(get_effective_time(news_b))
     if not time_a or not time_b:
         return 0.0
 

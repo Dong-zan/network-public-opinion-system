@@ -1,10 +1,4 @@
-"""Text preprocessing utilities for news analysis.
-
-The preprocessing module is the first step of the analysis pipeline. It accepts
-one raw news item from the backend, normalizes its metadata, cleans title and
-content, merges the analysable text, and returns tokens for later keyword,
-sentiment, similarity and lifecycle tasks.
-"""
+"""Text preprocessing utilities for news analysis."""
 
 from datetime import date, datetime
 from html import unescape
@@ -12,70 +6,28 @@ import re
 from typing import Any, Dict, List
 
 from .dependencies import get_jieba
+from .lexicon import load_domain_words, load_stopwords
 
-
-STOPWORDS = {
-    "的",
-    "了",
-    "和",
-    "是",
-    "在",
-    "就",
-    "也",
-    "有",
-    "与",
-    "对",
-    "中",
-    "为",
-    "等",
-    "及",
-    "或",
-    "一个",
-    "我们",
-    "你们",
-    "他们",
-    "进行",
-    "相关",
-    "表示",
-    "记者",
-    "报道",
-    "新闻",
-    "来源",
-    "时间",
-    "链接",
-    "网页",
-    "发布",
-}
-
-DOMAIN_WORDS = {
-    "人工智能",
-    "网络安全",
-    "官方回应",
-    "官方通报",
-    "突发",
-    "事故",
-    "火灾",
-    "救援",
-    "调查",
-    "通报",
-    "回应",
-    "网友",
-    "关注",
-    "现场",
-    "安全",
-    "管理",
-    "媒体",
-    "报道",
-    "质疑",
-    "爆料",
-    "风险",
-    "舆情",
-    "伤亡",
-    "投诉",
-    "处罚",
-}
 
 REQUIRED_FIELDS = ("news_id", "title", "content", "source", "publish_time", "url")
+TIME_FALLBACK_FIELDS = ("publish_time", "crawl_time", "created_at")
+VALUABLE_NUMBER_PATTERN = re.compile(
+    r"^\d+(?:\.\d+)?(?:%|％|年|月|日|时|分|秒|小时|天|人|名|例|起|件|万|亿|元|级|号|次|个|条|岁)$"
+)
+
+_DOMAIN_WORDS_REGISTERED = False
+
+
+def _ensure_domain_words_registered() -> None:
+    """Add domain words to jieba once so domain phrases are not split apart."""
+    global _DOMAIN_WORDS_REGISTERED
+    if _DOMAIN_WORDS_REGISTERED:
+        return
+
+    jieba = get_jieba()
+    for word in load_domain_words():
+        jieba.add_word(word)
+    _DOMAIN_WORDS_REGISTERED = True
 
 
 def clean_text(text: str) -> str:
@@ -89,7 +41,11 @@ def clean_text(text: str) -> str:
     text = re.sub(r"https?://\S+|www\.\S+", " ", text)
     text = re.sub(r"@\S+|#([^#]+)#", r" \1 ", text)
     text = re.sub(r"[\u200b-\u200f\ufeff]", " ", text)
-    text = re.sub(r"[^\u4e00-\u9fa5a-zA-Z0-9，。！？；：、,.!?;:]", " ", text)
+    text = re.sub(
+        r"[^\u4e00-\u9fa5a-zA-Z0-9，。！？；：、,.!?;:%％年月日时分秒万亿千百十人名例起件元级号次个条岁-]",
+        " ",
+        text,
+    )
     text = re.sub(r"\s+([，。！？；：、,.!?;:])", r"\1", text)
     text = re.sub(r"([，。！？；：、,.!?;:]){2,}", r"\1", text)
     text = re.sub(r"\s+", " ", text).strip()
@@ -128,13 +84,32 @@ def normalize_publish_time(publish_time: Any) -> str:
     return value
 
 
+def get_effective_time(news: Dict) -> str:
+    """Return publish_time, or the best available backend collection time."""
+    for field in TIME_FALLBACK_FIELDS:
+        normalized = normalize_publish_time(news.get(field, ""))
+        if normalized:
+            return normalized
+    return ""
+
+
 def merge_title_content(news: Dict) -> str:
     """Merge title and content so the title receives natural extra weight."""
     title = clean_text(news.get("title", ""))
     content = clean_text(news.get("content", ""))
+    if title and content and content.startswith(title):
+        return content
     if title and content:
         return f"{title}。{content}".strip("。")
     return title or content
+
+
+def _is_low_value_number(token: str) -> bool:
+    if not re.search(r"\d", token):
+        return False
+    if VALUABLE_NUMBER_PATTERN.fullmatch(token):
+        return False
+    return bool(re.fullmatch(r"\d+(?:\.\d+)?", token))
 
 
 def tokenize(text: str) -> List[str]:
@@ -143,16 +118,18 @@ def tokenize(text: str) -> List[str]:
     if not cleaned:
         return []
 
+    _ensure_domain_words_registered()
     raw_tokens = get_jieba().lcut(cleaned)
+    stopwords = load_stopwords()
 
     tokens = []
     for token in raw_tokens:
         token = token.strip()
         if len(token) < 2:
             continue
-        if token in STOPWORDS:
+        if token in stopwords:
             continue
-        if re.fullmatch(r"\d+", token):
+        if _is_low_value_number(token):
             continue
         tokens.append(token)
     return tokens
@@ -174,6 +151,7 @@ def preprocess_news(news: Dict) -> Dict:
     clean_content = clean_text(news.get("content", ""))
     source = normalize_source(news.get("source", ""))
     publish_time = normalize_publish_time(news.get("publish_time", ""))
+    effective_time = get_effective_time(news)
     url = normalize_url(news.get("url", ""))
     text = merge_title_content(news)
     tokens = tokenize(text)
@@ -184,6 +162,7 @@ def preprocess_news(news: Dict) -> Dict:
         "content": clean_content,
         "source": source,
         "publish_time": publish_time,
+        "effective_time": effective_time,
         "url": url,
         "text": text,
         "tokens": tokens,

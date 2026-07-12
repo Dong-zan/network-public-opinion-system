@@ -3,26 +3,24 @@
 from typing import List
 
 from .dependencies import get_jieba_analyse
+from .lexicon import load_sensitive_words
 
 
-SENSITIVE_WORDS = {
-    "突发",
-    "事故",
-    "通报",
-    "回应",
-    "救援",
-    "调查",
-    "官方",
-    "网传",
-    "爆料",
-    "舆情",
-    "投诉",
-    "处罚",
-    "风险",
-    "伤亡",
-    "火灾",
-    "安全",
-}
+def _deduplicate(words: List[str]) -> List[str]:
+    result = []
+    seen = set()
+    for word in words:
+        normalized = word.strip()
+        if len(normalized) < 2 or normalized in seen:
+            continue
+        result.append(normalized)
+        seen.add(normalized)
+    return result
+
+
+def _find_sensitive_hits(text: str) -> List[str]:
+    sensitive_words = [word for word in load_sensitive_words() if len(word.strip()) >= 2 and word in text]
+    return sorted(sensitive_words, key=lambda word: (text.find(word), -len(word)))
 
 
 def extract_keywords(text: str, top_k: int = 5) -> List[str]:
@@ -30,5 +28,20 @@ def extract_keywords(text: str, top_k: int = 5) -> List[str]:
     if not text:
         return []
 
-    keywords = get_jieba_analyse().extract_tags(text, topK=top_k, withWeight=False)
-    return [word for word in keywords if len(word.strip()) >= 2]
+    candidate_count = max(top_k * 3, top_k)
+    jieba_keywords = _deduplicate(
+        get_jieba_analyse().extract_tags(text, topK=candidate_count, withWeight=False)
+    )
+    sensitive_hits = _find_sensitive_hits(text)
+
+    selected = []
+    for keyword in jieba_keywords:
+        if any(sensitive in keyword for sensitive in sensitive_hits):
+            selected.append(keyword)
+
+    for sensitive in sensitive_hits:
+        if not any(sensitive in keyword for keyword in selected):
+            selected.append(sensitive)
+
+    selected.extend(jieba_keywords)
+    return _deduplicate(selected)[:top_k]
