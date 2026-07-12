@@ -4,12 +4,6 @@
 
 网络舆情事件智能分析系统的数据采集层，覆盖 5 个数据源（人民网、新华网、中新网、新浪新闻、微博），自动采集、清洗去重、输出统一 JSON 供后端和 NLP 分析使用。
 
-## 后端集成
-
-```python
-from crawler import run_once
-articles = run_once()  # → list[dict]，每条 15 个字段
-```
 
 ## 技术栈
 
