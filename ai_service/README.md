@@ -1,12 +1,13 @@
 # AI Service
 
-成员 5 的独立 AI 服务。当前包含基于单个舆情事件上下文的单轮智能问答和智能事件分析报告。
+成员 5 的独立 AI 服务。当前包含基于单个舆情事件上下文的单轮智能问答、智能事件分析报告和多来源事实核验第一阶段。
 
 ## 当前能力
 
 - `GET /health`：服务健康检查。
 - `POST /ai/ask`：基于 1 号后端传入的 `EventContext` 回答事件概述、风险解释、情感、媒体来源、具体文章和趋势限制等问题。
 - `POST /ai/report`：基于同一 `EventContext` 生成结构化的事件概述、整体总结、趋势解释、风险解释、建议和局限说明。
+- `POST /ai/verify`：在当前事件输入的文章范围内，按原子事实主张执行确定性的多来源证据核验。
 - 智能问答与智能报告是两个独立功能，只共享 EventContext、Provider、配置和统一异常边界。
 - 当前业务规则、问题分类和文章 Top-K 检索能力已经实现。
 - 默认使用稳定、离线的 `FakeLLMProvider`，仅用于测试和离线联调，不访问网络，也不需要 API Key。
@@ -16,10 +17,11 @@
 - 当前调用为非流式、单轮事件问答，默认关闭思考模式。
 - 报告接口在 DeepSeek 模式下要求模型返回 JSON，并通过 Pydantic 校验；结构错误最多安全修复一次。
 - 图表不由大模型生成。完整详情页由前端组合结构化图表数据和 AI 报告文字。
+- 第一阶段核验不调用 Provider、不联网，不使用模型自报置信度；`evidence_score` 是启发式证据评分，不代表事实为真的概率。
 
 ## 当前不包含
 
-- 可信度评估
+- 联网事实核查和外部权威数据库检索
 - 传播路径分析
 - 多轮对话
 - 流式输出
@@ -75,10 +77,13 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-flash
 DEEPSEEK_THINKING_ENABLED=false
 DEEPSEEK_TIMEOUT_SECONDS=45
-DEEPSEEK_MAX_TOKENS=1000
+DEEPSEEK_MAX_TOKENS=3000
 DEEPSEEK_TEMPERATURE=0.2
 AI_REPORT_TOP_K=5
 AI_REPORT_ARTICLE_MAX_CHARS=1000
+AI_VERIFY_MAX_CANDIDATES=50
+AI_VERIFY_MAX_SENTENCES_PER_ARTICLE=100
+AI_VERIFY_ARTICLE_MAX_CHARS=5000
 ```
 
 `.env` 已被 `.gitignore` 排除。源码、测试、日志和 API 响应都不应包含真实密钥。`AI_LLM_PROVIDER` 只接受 `fake` 或 `deepseek`，其他值会明确报错；选择 `deepseek` 但密钥为空也会在初始化时失败，不会回退到 Fake。
@@ -100,6 +105,20 @@ uvicorn app.main:app --host 127.0.0.1 --port 8005 --env-file .env
 5. 联调结束后停止服务，不要把 `.env`、请求头或密钥粘贴到日志、测试和提交记录中。
 
 自动测试全部使用 Fake 或 mock 客户端，不会发出真实 DeepSeek 请求，也不会消耗 API 额度。
+
+## 多来源事实核验边界
+
+`/ai/verify` 以目标文章中的原子事实主张为核验单位，不对整篇文章简单判定真假。目标文章不能作为自己的支持证据；候选证据会按文章编号、URL、相同正文和正文相似度处理。高相似正文只有在关键事实签名一致时才去重，数字、地点、时间、伤亡类型、原因或状态不同的近似报道会保留用于识别潜在冲突。最终证据引用必须逐字存在于输入文章正文，文章编号、来源和 URL 均从 `EventContext` 回填。
+
+第一阶段支持伤亡类型与数量、地点、事件时间、原因、处置状态、调查结论、已确认与尚未确认状态、独立来源数量和确定性结论汇总。它只处理请求中提供的事件文章，不进行联网搜索，也不将“仍在调查”视为具体原因已经证实。
+
+内部主张将认识状态和命题正负分开处理，并完整保留可识别的事件日期、时间和日期时间。伤亡数量、处置状态和调查结论等可变化事实会结合文章发布时间判断信息演化；较晚报道中的合理进展不会自动作为对较早报道的反驳。文章发布时间只用于判断报道先后，不会被当作事件发生时间。
+
+独立来源按规范化来源名称、URL hostname 和转载关系保守聚类：来源名相同或 hostname 相同均只计一个来源簇。核验请求中的非空 `news_id` 必须唯一，重复编号会返回422，避免证据正文和来源被覆盖。
+
+`evidence_score` 表示系统对当前整体核验结论的启发式证据强度。评分只聚合支撑 `overall_verdict` 的对应主张，不会因大量无结论主张被简单平均稀释；覆盖不足由 `verification_coverage` 和 `limitations` 表达。高分必须与 `overall_verdict` 一起阅读：高分配合 `contradicted` 表示反驳证据较强，并不表示目标文章更真实。该分数不是新闻真实性概率，也不是模型自报置信度。
+
+核验默认最多处理50篇候选文章、每篇100个句子和每篇5000个字符。超过 `AI_VERIFY_MAX_CANDIDATES`、`AI_VERIFY_MAX_SENTENCES_PER_ARTICLE` 或 `AI_VERIFY_ARTICLE_MAX_CHARS` 时会按输入顺序确定性截断，并在 `limitations` 中说明。
 
 ## 报告与图表边界
 
@@ -201,3 +220,32 @@ Content-Type: application/json
   "limitations": ["数据不足说明"]
 }
 ```
+
+多来源事实核验：
+
+```http
+POST /ai/verify
+Content-Type: application/json
+
+{
+  "event": {
+    "event_id": 1,
+    "title": "事件标题",
+    "summary": "事件背景摘要",
+    "articles": [
+      {
+        "news_id": 1001,
+        "title": "待核验报道",
+        "content": "事故造成3人受伤。",
+        "source": "媒体甲",
+        "url": "https://example.com/1001"
+      }
+    ],
+    "analysis": {}
+  },
+  "target_news_id": 1001,
+  "max_claims": 5
+}
+```
+
+核验响应中的 `overall_verdict` 和每条主张结论使用 `supported`、`contradicted`、`conflicting`、`insufficient_evidence` 或 `not_verifiable`。`score_type` 固定为 `heuristic_evidence_score`。响应还提供可核验主张数、确定结论数、核验覆盖率和评分解释；这些新增字段不改变原有字段。
