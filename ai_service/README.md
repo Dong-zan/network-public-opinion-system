@@ -112,6 +112,34 @@ uvicorn app.main:app --host 127.0.0.1 --port 8005 --env-file .env
 
 自动测试全部使用 Fake 或 mock 客户端，不会发出真实 DeepSeek 请求，也不会消耗 API 额度。
 
+## /ai/verify 语义校准（仅离线开发）
+
+`semantic_assessment` 是可选增强结果，默认 `AI_VERIFY_SEMANTIC_ENABLED=false`。它不会参与 `overall_verdict`、`claim_results`、`evidence_score`、可信度 `risk_score`、`risk_label`、`assessment_confidence` 或第一阶段确定性摘要。
+
+仓库内的 `tests/fixtures/verification_semantic_calibration.json` 使用虚构、脱敏文章和预置候选输出。运行 Validator 离线评测：
+
+```powershell
+python scripts/evaluate_verification_semantic.py --mode fixture-validator
+```
+
+人工校准真实模型时：
+
+1. 确认默认语义开关关闭，只准备脱敏、虚构的测试文章。
+2. 在个人本地环境临时启用语义功能，人工调用模型并仅保存其原始 JSON 输出。
+3. 输出按 `{"outputs":[{"case_id":"...","output":{...}}]}` 保存到 `local_calibration_outputs/`；该目录已被 Git 忽略。
+4. 关闭语义功能，使用以下命令离线计算指标：
+
+```powershell
+python scripts/evaluate_verification_semantic.py `
+  --mode saved-output `
+  --saved-output local_calibration_outputs/deepseek-output.json `
+  --report local_calibration_outputs/evaluation-report.json
+```
+
+评测脚本不会创建 Provider 或访问网络。不得提交真实 `.env`、API Key、真实用户新闻、完整敏感 Prompt 或真实模型输出。
+
+进入第二阶段 B 前，建议人工校准达到：复杂风险总体 precision 不低于 0.85；`preliminary_as_confirmed` 和 `title_body_mismatch` precision 不低于 0.90；`unsupported_causality` precision 不低于 0.80；中性案例误报率不高于 0.10；Schema/fallback 比例处于可接受范围。fixture-validator 的确定性准入要求 precision 为 1.0，且伪造 quote、错误 evidence news_id 和不存在 claim id 均不得通过。这些阈值只用于开发验收，不会自动改变业务评分。
+
 ## 多来源事实核验边界
 
 `/ai/verify` 以目标文章中的原子事实主张为核验单位，不对整篇文章简单判定真假。目标文章不能作为自己的支持证据；候选证据会按文章编号、URL、相同正文和正文相似度处理。高相似正文只有在关键事实签名一致时才去重，数字、地点、时间、伤亡类型、原因或状态不同的近似报道会保留用于识别潜在冲突。最终证据引用必须逐字存在于输入文章正文，文章编号、来源和 URL 均从 `EventContext` 回填。

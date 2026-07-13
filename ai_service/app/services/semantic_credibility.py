@@ -179,33 +179,35 @@ class SemanticCredibilityValidator:
 
     def _accept_flag(self, flag, claims, context, verified_evidence) -> bool:
         if flag.type == "preliminary_as_confirmed":
-            return self._is_preliminary_as_confirmed(flag)
+            return self._is_preliminary_as_confirmed(flag, claims)
         if flag.type == "uncertainty_removed":
-            return self._is_uncertainty_removed(flag)
+            return self._is_uncertainty_removed(flag, claims)
         if flag.type == "title_body_mismatch":
             return self._is_title_body_mismatch(flag, context.target_article)
         if flag.type == "unsupported_causality":
             return self._is_unsupported_causality(flag, claims, verified_evidence)
         return True
 
-    def _is_preliminary_as_confirmed(self, flag) -> bool:
+    def _is_preliminary_as_confirmed(self, flag, claims) -> bool:
+        claim_text = claims[flag.related_claim_id].claim if flag.related_claim_id in claims else None
         return (
             flag.related_claim_id is not None
             and flag.evidence_quote is not None
             and self._contains_uncertainty(flag.evidence_quote)
             and self._contains_finality(flag.quote)
             and not self._contains_uncertainty(flag.quote)
-            and self._same_core_subject(flag.quote, flag.evidence_quote)
+            and self._same_core_subject(flag.quote, flag.evidence_quote, claim_text)
         )
 
-    def _is_uncertainty_removed(self, flag) -> bool:
+    def _is_uncertainty_removed(self, flag, claims) -> bool:
+        claim_text = claims[flag.related_claim_id].claim if flag.related_claim_id in claims else None
         return (
             flag.related_claim_id is not None
             and flag.evidence_quote is not None
             and self._contains_uncertainty(flag.evidence_quote)
             and not self._contains_uncertainty(flag.quote)
             and self._contains_finality_or_confirmation(flag.quote)
-            and self._same_core_subject(flag.quote, flag.evidence_quote)
+            and self._same_core_subject(flag.quote, flag.evidence_quote, claim_text)
         )
 
     def _is_title_body_mismatch(self, flag, target: Article) -> bool:
@@ -250,18 +252,46 @@ class SemanticCredibilityValidator:
         return any(marker in compact for marker in cls._CAUSAL_MARKERS)
 
     @classmethod
-    def _same_core_subject(cls, first: str, second: str) -> bool:
+    def _same_core_subject(cls, first: str, second: str, claim_text: str | None = None) -> bool:
         def normalized(value: str) -> str:
-            for marker in (*cls._UNCERTAINTY_MARKERS, *cls._FINALITY_MARKERS, "事故原因", "具体原因", "初步原因"):
+            for marker in (
+                *cls._UNCERTAINTY_MARKERS,
+                *cls._FINALITY_MARKERS,
+                "事故原因",
+                "具体原因",
+                "初步原因",
+                "最终原因",
+                "原因是",
+                "排查显示",
+                "已经确认",
+                "明确确认",
+                "指向",
+                "百分百",
+            ):
                 value = value.replace(marker, "")
             return re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", value)
 
         first_normalized, second_normalized = normalized(first), normalized(second)
-        if len(first_normalized) < 2 or len(second_normalized) < 2:
+        if not cls._has_substantial_overlap(first_normalized, second_normalized):
             return False
-        first_terms = {first_normalized[index : index + 2] for index in range(len(first_normalized) - 1)}
-        second_terms = {second_normalized[index : index + 2] for index in range(len(second_normalized) - 1)}
-        return bool(first_terms & second_terms)
+        if claim_text is None:
+            return True
+        claim_normalized = normalized(claim_text)
+        return cls._has_substantial_overlap(first_normalized, claim_normalized) and cls._has_substantial_overlap(
+            second_normalized, claim_normalized
+        )
+
+    @staticmethod
+    def _has_substantial_overlap(first: str, second: str) -> bool:
+        if len(first) < 3 or len(second) < 3:
+            return False
+        if min(len(first), len(second)) >= 4 and (first in second or second in first):
+            return True
+        first_terms = {first[index : index + 2] for index in range(len(first) - 1)}
+        second_terms = {second[index : index + 2] for index in range(len(second) - 1)}
+        smaller_size = min(len(first_terms), len(second_terms))
+        overlap_size = len(first_terms & second_terms)
+        return overlap_size >= 2 and overlap_size / smaller_size >= 0.6
 
     @staticmethod
     def _explicit_title_body_conflict(title_quote: str, body_quote: str) -> bool:
@@ -296,24 +326,23 @@ class SemanticCredibilityValidator:
 
     @staticmethod
     def _publisher_role_matches_metadata(role: str, target: Article) -> bool:
-        if role == "government_notice" and target.is_official is True:
-            return True
-        metadata = " ".join(
-            value.lower()
-            for value in (target.platform, target.account_type or "", target.source_type or "")
+        account_metadata = " ".join(
+            value.lower() for value in (target.account_type or "", target.source_type or "")
         )
+        media_metadata = " ".join((target.platform.lower(), account_metadata))
         markers = {
             "news_media": ("新闻", "媒体", "报", "电视", "广播"),
             "social_account": ("社交", "微博", "微信", "自媒体", "账号"),
-            "operator": ("企业", "公司", "运营", "机构"),
-            "government_notice": ("政府", "政务", "官方"),
+            "operator": ("企业", "公司", "运营方"),
+            "government_notice": ("政府", "政务", "党政机关", "政府部门"),
             "regulator": ("监管", "市场监管"),
-            "emergency_management": ("应急",),
-            "fire_rescue": ("消防", "救援"),
+            "emergency_management": ("应急管理", "应急部门"),
+            "fire_rescue": ("消防救援", "消防部门"),
             "expert_group": ("专家", "研究机构"),
             "witness": ("目击", "现场"),
             "anonymous_source": ("匿名",),
         }
+        metadata = media_metadata if role in {"news_media", "social_account"} else account_metadata
         return any(marker in metadata for marker in markers.get(role, ()))
 
     @staticmethod
