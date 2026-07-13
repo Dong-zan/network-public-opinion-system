@@ -38,18 +38,21 @@ class CredibilityAssessmentService:
         scorer: CredibilityRiskScorer | None = None,
         narrative_builder: CredibilityNarrativeBuilder | None = None,
         confidence_config: AssessmentConfidenceConfig | None = None,
+        semantic_analyzer=None,
     ) -> None:
         self.source_evaluator = source_evaluator or SourceTraceabilityEvaluator()
         self.language_analyzer = language_analyzer or DeterministicLanguageRiskAnalyzer()
         self.scorer = scorer or CredibilityRiskScorer()
         self.narrative_builder = narrative_builder or CredibilityNarrativeBuilder()
         self.confidence_config = confidence_config or AssessmentConfidenceConfig()
+        self.semantic_analyzer = semantic_analyzer
 
     def assess(
         self,
         target_article: Article,
         verification: VerificationResponse,
         integrity: InputIntegrityMetadata,
+        articles: list[Article] | None = None,
     ) -> CredibilityAssessment:
         source = self.source_evaluator.evaluate(target_article)
         language = self.language_analyzer.analyze(target_article)
@@ -61,7 +64,7 @@ class CredibilityAssessmentService:
             warnings.append("部分输入已确定性截断，评估覆盖可能受限。")
         if verification.overall_verdict in {"insufficient_evidence", "not_verifiable"}:
             warnings.append("当前结论受限于输入材料的独立来源数量和可核验范围。")
-        return CredibilityAssessment(
+        assessment = CredibilityAssessment(
             version=self.scorer.config.version,
             analysis_method="deterministic",
             risk_label=score.risk_label,
@@ -74,6 +77,15 @@ class CredibilityAssessmentService:
             summary=summary,
             warnings=warnings,
         )
+        if self.semantic_analyzer is None:
+            return assessment
+        semantic = self.semantic_analyzer.analyze(
+            target_article,
+            verification,
+            assessment,
+            articles or [target_article],
+        )
+        return assessment.model_copy(update={"semantic_assessment": semantic})
 
     def _confidence(self, verification: VerificationResponse, source, integrity: InputIntegrityMetadata) -> float:
         config = self.confidence_config

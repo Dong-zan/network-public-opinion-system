@@ -153,6 +153,7 @@ class VerificationService:
                 input_truncated=input_truncated,
                 article_count=len(event.articles),
             ),
+            event.articles,
         )
         return response.model_copy(update={"credibility_assessment": assessment})
 
@@ -452,7 +453,20 @@ class VerificationService:
 
 @lru_cache
 def get_verification_service() -> VerificationService:
+    assessment_service = CredibilityAssessmentService()
+    if settings.verify_semantic_enabled:
+        from app.llm.factory import create_llm_provider
+        from app.services.semantic_credibility import LlmSemanticCredibilityAnalyzer
+
+        assessment_service = CredibilityAssessmentService(
+            semantic_analyzer=LlmSemanticCredibilityAnalyzer(
+                create_llm_provider(settings.llm_provider, config=settings),
+                article_max_chars=settings.verify_semantic_article_max_chars,
+                max_flags=settings.verify_semantic_max_flags,
+            )
+        )
     return VerificationService(
+        credibility_assessment_service=assessment_service,
         max_candidates=settings.verify_max_candidates,
         max_sentences_per_article=settings.verify_max_sentences_per_article,
         article_max_chars=settings.verify_article_max_chars,

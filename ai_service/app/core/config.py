@@ -57,6 +57,15 @@ class Settings:
     verify_article_max_chars: int = field(
         default_factory=lambda: _positive_int("AI_VERIFY_ARTICLE_MAX_CHARS", 5000)
     )
+    verify_semantic_enabled: bool = field(
+        default_factory=lambda: _boolean("AI_VERIFY_SEMANTIC_ENABLED", False)
+    )
+    verify_semantic_article_max_chars: int = field(
+        default_factory=lambda: _positive_int("AI_VERIFY_SEMANTIC_ARTICLE_MAX_CHARS", 5000)
+    )
+    verify_semantic_max_flags: int = field(
+        default_factory=lambda: _positive_int("AI_VERIFY_SEMANTIC_MAX_FLAGS", 12)
+    )
     evidence_graph_max_articles: int = field(
         default_factory=lambda: _positive_int("AI_EVIDENCE_GRAPH_MAX_ARTICLES", 50)
     )

@@ -31,6 +31,23 @@ LanguageRiskType = Literal[
     "uncertainty_removed",
     "unsupported_generalization",
 ]
+SemanticAssessmentStatus = Literal["success", "fallback"]
+SemanticAssessmentMethod = Literal["llm", "deterministic_fallback"]
+SourceRole = Literal[
+    "government_notice",
+    "regulator",
+    "emergency_management",
+    "fire_rescue",
+    "operator",
+    "expert_group",
+    "news_media",
+    "witness",
+    "social_account",
+    "anonymous_source",
+    "unknown",
+]
+RoleRelevance = Literal["high", "medium", "low", "unknown"]
+RoleAssessmentBasis = Literal["publisher_metadata", "attribution_quote", "unknown"]
 NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
@@ -134,6 +151,41 @@ class LanguageAssessment(BaseModel):
     flags: list[LanguageRiskFlag] = Field(default_factory=list)
 
 
+class SemanticLanguageRiskFlag(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: LanguageRiskType
+    severity: int = Field(ge=1, le=3)
+    quote: NonEmptyText
+    explanation: NonEmptyText
+    related_claim_id: int | None = Field(default=None, ge=1)
+    evidence_quote: NonEmptyText | None = None
+    evidence_news_id: int | str | None = None
+    comparison_quote: NonEmptyText | None = None
+
+
+class ClaimSourceRoleAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    claim_id: int = Field(ge=1)
+    publisher_role: SourceRole = "unknown"
+    attributed_role: SourceRole = "unknown"
+    role_relevance: RoleRelevance = "unknown"
+    quote: NonEmptyText | None = None
+    explanation: NonEmptyText
+    basis: RoleAssessmentBasis = "unknown"
+
+
+class SemanticCredibilityAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: SemanticAssessmentStatus
+    analysis_method: SemanticAssessmentMethod
+    language_flags: list[SemanticLanguageRiskFlag] = Field(default_factory=list, max_length=12)
+    source_role_assessments: list[ClaimSourceRoleAssessment] = Field(default_factory=list, max_length=12)
+    limitations: list[NonEmptyText] = Field(default_factory=list)
+
+
 class CredibilityAssessment(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -148,6 +200,7 @@ class CredibilityAssessment(BaseModel):
     decisive_factors: list[NonEmptyText] = Field(default_factory=list)
     summary: NonEmptyText
     warnings: list[NonEmptyText] = Field(default_factory=list)
+    semantic_assessment: SemanticCredibilityAssessment | None = None
 
 
 class VerificationResponse(BaseModel):
