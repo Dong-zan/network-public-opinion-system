@@ -15,6 +15,22 @@ VerificationVerdict = Literal[
 ]
 EvidenceStance = Literal["supports", "contradicts"]
 ContextEvidenceRelation = Literal["related", "updates"]
+CredibilityMethod = Literal["deterministic", "hybrid", "deterministic_fallback"]
+CredibilityRiskLabel = Literal["low", "caution", "suspicious", "high", "not_assessable"]
+SourceAssessmentStatus = Literal["verified", "partially_verified", "unknown", "mismatch"]
+LanguageRiskLevel = Literal["low", "medium", "high", "unknown"]
+LanguageRiskType = Literal[
+    "absolute_claim",
+    "sensational_language",
+    "anonymous_attribution",
+    "emotional_manipulation",
+    "conspiracy_claim",
+    "unsupported_causality",
+    "title_body_mismatch",
+    "preliminary_as_confirmed",
+    "uncertainty_removed",
+    "unsupported_generalization",
+]
 NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
@@ -76,6 +92,64 @@ class ClaimVerificationResult(BaseModel):
     explanation: str | None = None
 
 
+class EvidenceAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    verdict: VerificationVerdict
+    evidence_score: float = Field(ge=0, le=100)
+    risk_score: float = Field(ge=0, le=100)
+    independent_source_count: int = Field(ge=0)
+    explanation: NonEmptyText
+
+
+class SourceAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: SourceAssessmentStatus
+    traceability_score: float | None = Field(default=None, ge=0, le=100)
+    risk_score: float = Field(ge=0, le=100)
+    registered_source: bool
+    canonical_name: NonEmptyText | None = None
+    hostname: NonEmptyText | None = None
+    domain_match: bool | None = None
+    metadata_coverage: float = Field(ge=0, le=100)
+    signals: list[NonEmptyText] = Field(default_factory=list)
+
+
+class LanguageRiskFlag(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: LanguageRiskType
+    severity: int = Field(ge=1, le=3)
+    quote: NonEmptyText
+    explanation: NonEmptyText
+
+
+class LanguageAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    risk_level: LanguageRiskLevel
+    risk_score: float = Field(ge=0, le=100)
+    analysis_method: Literal["deterministic"] = "deterministic"
+    flags: list[LanguageRiskFlag] = Field(default_factory=list)
+
+
+class CredibilityAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: NonEmptyText
+    analysis_method: CredibilityMethod
+    risk_label: CredibilityRiskLabel
+    risk_score: float = Field(ge=0, le=100)
+    assessment_confidence: float = Field(ge=0, le=100)
+    evidence_assessment: EvidenceAssessment
+    source_assessment: SourceAssessment
+    language_assessment: LanguageAssessment
+    decisive_factors: list[NonEmptyText] = Field(default_factory=list)
+    summary: NonEmptyText
+    warnings: list[NonEmptyText] = Field(default_factory=list)
+
+
 class VerificationResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -92,3 +166,4 @@ class VerificationResponse(BaseModel):
     score_explanation: NonEmptyText = (
         "evidence_score表示当前核验结论的启发式证据强度，不是文章真实性概率。"
     )
+    credibility_assessment: CredibilityAssessment | None = None

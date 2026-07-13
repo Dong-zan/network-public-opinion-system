@@ -14,6 +14,10 @@ class Article(BaseModel):
     is_official: bool | None = None
     account_type: str | None = None
     source_type: str | None = None
+    author: str | None = None
+    reference_urls: list[str] = Field(default_factory=list)
+    quoted_news_ids: list[int | str] = Field(default_factory=list)
+    duplicate_group_id: str | None = None
 
 
 class Sentiment(BaseModel):

@@ -9,6 +9,10 @@ from app.schemas.verification import (
     VerificationVerdict,
 )
 from app.services.claim_extractor import AtomicClaim, ClaimExtractor
+from app.services.credibility_assessment_service import (
+    CredibilityAssessmentService,
+    InputIntegrityMetadata,
+)
 from app.services.evidence_retriever import EvidenceRetriever
 from app.services.evidence_validator import EvidenceValidator
 from app.services.verification_scorer import VerificationScorer
@@ -26,6 +30,7 @@ class VerificationService:
         retriever: EvidenceRetriever | None = None,
         validator: EvidenceValidator | None = None,
         scorer: VerificationScorer | None = None,
+        credibility_assessment_service: CredibilityAssessmentService | None = None,
         *,
         max_candidates: int = 50,
         max_sentences_per_article: int = 100,
@@ -42,6 +47,9 @@ class VerificationService:
         )
         self.validator = validator or EvidenceValidator()
         self.scorer = scorer or VerificationScorer()
+        self.credibility_assessment_service = (
+            credibility_assessment_service or CredibilityAssessmentService()
+        )
 
     def verify(
         self,
@@ -119,7 +127,7 @@ class VerificationService:
             ),
             sentence_limit_applied=sentence_limit_applied,
         )
-        return VerificationResponse(
+        response = VerificationResponse(
             target_news_id=target.news_id if target.news_id is not None else target_news_id,
             overall_verdict=overall_verdict,
             evidence_score=evidence_score,
@@ -131,6 +139,22 @@ class VerificationService:
             verification_coverage=coverage,
             score_explanation=self._score_explanation(overall_verdict, evidence_score),
         )
+        input_truncated = (
+            target_truncated
+            or selection.candidate_limit_applied
+            or bool(selection.article_truncated_count)
+            or sentence_limit_applied
+            or evidence_article_truncated
+        )
+        assessment = self.credibility_assessment_service.assess(
+            target,
+            response,
+            InputIntegrityMetadata(
+                input_truncated=input_truncated,
+                article_count=len(event.articles),
+            ),
+        )
+        return response.model_copy(update={"credibility_assessment": assessment})
 
     def _verify_claim(
         self,
