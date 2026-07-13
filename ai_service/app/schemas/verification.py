@@ -2,6 +2,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from app.core.news_identity import normalized_news_id
 from app.schemas.event import EventContext
 
 
@@ -28,9 +29,9 @@ class VerificationRequest(BaseModel):
     def validate_unique_news_ids(self):
         seen = set()
         for article in self.event.articles:
-            if article.news_id is None or not str(article.news_id).strip():
+            key = normalized_news_id(article.news_id)
+            if key is None:
                 continue
-            key = str(article.news_id).strip()
             if key in seen:
                 raise ValueError("核验事件中的非空news_id必须唯一")
             seen.add(key)

@@ -5,6 +5,7 @@ from difflib import SequenceMatcher
 from urllib.parse import urlsplit, urlunsplit
 
 from app.schemas.event import Article
+from app.core.news_identity import normalized_news_id
 from app.services.claim_extractor import AtomicClaim, ClaimExtractor
 from app.services.stance_classifier import StanceClassifier
 
@@ -32,6 +33,13 @@ class CandidateSelection:
     candidate_limit_applied: bool
     article_truncated_count: int
     near_duplicate_fact_difference_count: int
+
+
+@dataclass(frozen=True)
+class DuplicateDecision:
+    is_duplicate: bool
+    reason_code: str | None = None
+    same_url_with_fact_difference: bool = False
 
 
 class EvidenceRetriever:
@@ -69,7 +77,7 @@ class EvidenceRetriever:
             for article in articles
             if article is not target
             and not self._same_news_id(article.news_id, target.news_id)
-            and article.news_id is not None
+            and self._id_key(article.news_id) is not None
             and bool(article.content.strip())
             and len(article.content) > self.article_max_chars
         )
@@ -77,7 +85,7 @@ class EvidenceRetriever:
         for article in articles:
             if article is target or self._same_news_id(article.news_id, target.news_id):
                 continue
-            if article.news_id is None or not article.content.strip():
+            if self._id_key(article.news_id) is None or not article.content.strip():
                 continue
             if len(selected) >= self.max_candidates:
                 candidate_limit_applied = True
@@ -179,6 +187,38 @@ class EvidenceRetriever:
             article_truncated=article_truncated,
         )
 
+    def articles_are_duplicates(self, left: Article, right: Article) -> bool:
+        return self.graph_duplicate_decision(left, right).is_duplicate
+
+    def graph_duplicate_decision(
+        self,
+        left: Article,
+        right: Article,
+    ) -> DuplicateDecision:
+        if self._same_news_id(left.news_id, right.news_id):
+            return DuplicateDecision(True, "same_news_id")
+        left_url = self._normalized_url(left.url)
+        right_url = self._normalized_url(right.url)
+        if left_url and left_url == right_url:
+            left_signatures = self._fact_signatures(left.content)
+            right_signatures = self._fact_signatures(right.content)
+            if left_signatures and right_signatures and left_signatures != right_signatures:
+                return DuplicateDecision(
+                    False,
+                    same_url_with_fact_difference=True,
+                )
+            return DuplicateDecision(True, "same_normalized_url")
+        left_body = self._normalized_body(left.content)
+        right_body = self._normalized_body(right.content)
+        if left_body and left_body == right_body:
+            return DuplicateDecision(True, "same_normalized_body")
+        if (
+            self._highly_similar_bodies(left_body, right_body)
+            and self._fact_signatures(left.content) == self._fact_signatures(right.content)
+        ):
+            return DuplicateDecision(True, "highly_similar_same_fact_signature")
+        return DuplicateDecision(False)
+
     def _fact_signatures(self, content: str) -> frozenset[tuple]:
         signatures = []
         for _, claim in self.extractor.extract_text(content[: self.article_max_chars]):
@@ -228,15 +268,13 @@ class EvidenceRetriever:
 
     @staticmethod
     def _same_news_id(left: int | str | None, right: int | str | None) -> bool:
-        return (
-            left is not None
-            and right is not None
-            and EvidenceRetriever._id_key(left) == EvidenceRetriever._id_key(right)
-        )
+        left_key = normalized_news_id(left)
+        right_key = normalized_news_id(right)
+        return left_key is not None and left_key == right_key
 
     @staticmethod
-    def _id_key(value: int | str | None) -> str:
-        return "" if value is None else str(value).strip()
+    def _id_key(value: int | str | None) -> str | None:
+        return normalized_news_id(value)
 
     @staticmethod
     def _highly_similar_bodies(left: str, right: str) -> bool:

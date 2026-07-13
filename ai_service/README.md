@@ -1,6 +1,6 @@
 # AI Service
 
-成员 5 的独立 AI 服务。当前包含基于单个舆情事件上下文的单轮智能问答、智能事件分析报告和多来源事实核验第一阶段。
+成员 5 的独立 AI 服务。当前包含基于单个舆情事件上下文的单轮智能问答、智能事件分析报告、多来源事实核验和可解释证据图谱第一阶段。
 
 ## 当前能力
 
@@ -8,6 +8,7 @@
 - `POST /ai/ask`：基于 1 号后端传入的 `EventContext` 回答事件概述、风险解释、情感、媒体来源、具体文章和趋势限制等问题。
 - `POST /ai/report`：基于同一 `EventContext` 生成结构化的事件概述、整体总结、趋势解释、风险解释、建议和局限说明。
 - `POST /ai/verify`：在当前事件输入的文章范围内，按原子事实主张执行确定性的多来源证据核验。
+- `POST /ai/evidence-graph`：确定性构建事件、文章、来源和原子主张图谱，并返回证据关系、主张簇、演化时间线及可解释结构指标。
 - 智能问答与智能报告是两个独立功能，只共享 EventContext、Provider、配置和统一异常边界。
 - 当前业务规则、问题分类和文章 Top-K 检索能力已经实现。
 - 默认使用稳定、离线的 `FakeLLMProvider`，仅用于测试和离线联调，不访问网络，也不需要 API Key。
@@ -18,6 +19,7 @@
 - 报告接口在 DeepSeek 模式下要求模型返回 JSON，并通过 Pydantic 校验；结构错误最多安全修复一次。
 - 图表不由大模型生成。完整详情页由前端组合结构化图表数据和 AI 报告文字。
 - 第一阶段核验不调用 Provider、不联网，不使用模型自报置信度；`evidence_score` 是启发式证据评分，不代表事实为真的概率。
+- 第一阶段证据图谱不调用 Provider；转载文章保留图节点，但不会增加独立来源数量，结构比例也不表示真实性概率。
 
 ## 当前不包含
 
@@ -84,6 +86,10 @@ AI_REPORT_ARTICLE_MAX_CHARS=1000
 AI_VERIFY_MAX_CANDIDATES=50
 AI_VERIFY_MAX_SENTENCES_PER_ARTICLE=100
 AI_VERIFY_ARTICLE_MAX_CHARS=5000
+AI_EVIDENCE_GRAPH_MAX_ARTICLES=50
+AI_EVIDENCE_GRAPH_MAX_CLAIMS_PER_ARTICLE=5
+AI_EVIDENCE_GRAPH_MAX_EDGES=500
+AI_EVIDENCE_GRAPH_ARTICLE_MAX_CHARS=5000
 ```
 
 `.env` 已被 `.gitignore` 排除。源码、测试、日志和 API 响应都不应包含真实密钥。`AI_LLM_PROVIDER` 只接受 `fake` 或 `deepseek`，其他值会明确报错；选择 `deepseek` 但密钥为空也会在初始化时失败，不会回退到 Fake。
@@ -119,6 +125,14 @@ uvicorn app.main:app --host 127.0.0.1 --port 8005 --env-file .env
 `evidence_score` 表示系统对当前整体核验结论的启发式证据强度。评分只聚合支撑 `overall_verdict` 的对应主张，不会因大量无结论主张被简单平均稀释；覆盖不足由 `verification_coverage` 和 `limitations` 表达。高分必须与 `overall_verdict` 一起阅读：高分配合 `contradicted` 表示反驳证据较强，并不表示目标文章更真实。该分数不是新闻真实性概率，也不是模型自报置信度。
 
 核验默认最多处理50篇候选文章、每篇100个句子和每篇5000个字符。超过 `AI_VERIFY_MAX_CANDIDATES`、`AI_VERIFY_MAX_SENTENCES_PER_ARTICLE` 或 `AI_VERIFY_ARTICLE_MAX_CHARS` 时会按输入顺序确定性截断，并在 `limitations` 中说明。
+
+## 可解释证据图谱边界
+
+`/ai/evidence-graph` 直接复用原子主张提取、立场分类、引用校验、来源聚类和转载识别能力，不通过 HTTP 调用 `/ai/verify`。图谱包含事件、文章、来源和主张节点，以及归属、发布、断言、支持、反驳、更新和转载关系。所有关系引用必须逐字存在于输入文章正文。
+
+主张簇优先使用 `claim_type`、规范化槽位、极性和确定性构建，参考时间单独用于演化排序。时间线依次优先使用主张参考时间、事件发生时间和文章发布时间；使用发布时间时会明确标记为 `publish_time`，不会伪装成事件发生时间。
+
+默认最多处理50篇文章、每篇5条主张、500条语义关系边和每篇5000字符。`AI_EVIDENCE_GRAPH_MAX_EDGES` 只限制 `supports`、`contradicts`、`updates` 的返回数量；`contains`、`published_by`、`asserts`、`duplicates` 等基础结构边始终完整返回。超过 `AI_EVIDENCE_GRAPH_MAX_ARTICLES`、`AI_EVIDENCE_GRAPH_MAX_CLAIMS_PER_ARTICLE`、`AI_EVIDENCE_GRAPH_MAX_EDGES` 或 `AI_EVIDENCE_GRAPH_ARTICLE_MAX_CHARS` 时会确定性截断并写入 `limitations`。冲突比例、转载比例和未解决主张比例只描述当前输入形成的图结构，不是真实性概率。
 
 ## 报告与图表边界
 

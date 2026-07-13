@@ -1,6 +1,4 @@
 from functools import lru_cache
-from urllib.parse import urlparse
-
 from app.core.config import settings
 from app.schemas.event import Article, EventContext
 from app.schemas.verification import (
@@ -14,6 +12,7 @@ from app.services.claim_extractor import AtomicClaim, ClaimExtractor
 from app.services.evidence_retriever import EvidenceRetriever
 from app.services.evidence_validator import EvidenceValidator
 from app.services.verification_scorer import VerificationScorer
+from app.services.source_clusterer import SourceClusterer, SourceDescriptor
 
 
 class TargetArticleNotFoundError(ValueError):
@@ -307,42 +306,19 @@ class VerificationService:
     def _stance_clusters(
         evidence: list[VerificationEvidence],
     ) -> tuple[set[int], set[int]]:
-        parents = list(range(len(evidence)))
-
-        def find(index: int) -> int:
-            while parents[index] != index:
-                parents[index] = parents[parents[index]]
-                index = parents[index]
-            return index
-
-        def union(left: int, right: int) -> None:
-            left_root = find(left)
-            right_root = find(right)
-            if left_root != right_root:
-                parents[right_root] = left_root
-
-        identities = []
-        for item in evidence:
-            identities.append(
-                (
-                    item.source.strip().lower(),
-                    (urlparse(item.url).hostname or "").lower(),
-                )
-            )
-        for left in range(len(evidence)):
-            for right in range(left + 1, len(evidence)):
-                same_source = identities[left][0] and identities[left][0] == identities[right][0]
-                same_host = identities[left][1] and identities[left][1] == identities[right][1]
-                if same_source or same_host:
-                    union(left, right)
+        descriptors = [
+            SourceDescriptor(source=item.source, url=item.url) for item in evidence
+        ]
+        clusterer = SourceClusterer()
+        clusters = clusterer.cluster_indices(descriptors)
 
         support_clusters = set()
         contradict_clusters = set()
         for index, item in enumerate(evidence):
-            if not any(identities[index]):
+            if not any(clusterer.identity(descriptors[index])):
                 continue
             target = support_clusters if item.stance == "supports" else contradict_clusters
-            target.add(find(index))
+            target.add(clusters[index])
         return support_clusters, contradict_clusters
 
     @staticmethod

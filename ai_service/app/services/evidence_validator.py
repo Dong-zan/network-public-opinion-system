@@ -1,5 +1,6 @@
 from app.schemas.event import Article
 from app.schemas.verification import VerificationContextEvidence, VerificationEvidence
+from app.core.news_identity import normalized_news_id
 
 
 class EvidenceValidator:
@@ -12,9 +13,9 @@ class EvidenceValidator:
         article_index = {}
         ambiguous_ids = set()
         for article in articles:
-            if article.news_id is None:
-                continue
             key = self._id_key(article.news_id)
+            if key is None:
+                continue
             if key in article_index:
                 ambiguous_ids.add(key)
                 article_index.pop(key, None)
@@ -25,7 +26,7 @@ class EvidenceValidator:
         seen = set()
         for item in evidence:
             key = self._id_key(item.news_id)
-            article = article_index.get(key)
+            article = article_index.get(key) if key is not None else None
             if article is None or key == target_key or item.quote not in article.content:
                 continue
             canonical = VerificationEvidence(
@@ -55,7 +56,7 @@ class EvidenceValidator:
         seen = set()
         for item in evidence:
             key = self._id_key(item.news_id)
-            article = article_index.get(key)
+            article = article_index.get(key) if key is not None else None
             if article is None or key == target_key or item.quote not in article.content:
                 continue
             canonical = VerificationContextEvidence(
@@ -78,9 +79,9 @@ class EvidenceValidator:
         article_index = {}
         ambiguous_ids = set()
         for article in articles:
-            if article.news_id is None:
-                continue
             key = cls._id_key(article.news_id)
+            if key is None:
+                continue
             if key in article_index:
                 ambiguous_ids.add(key)
                 article_index.pop(key, None)
@@ -89,5 +90,5 @@ class EvidenceValidator:
         return article_index
 
     @staticmethod
-    def _id_key(value: int | str | None) -> str:
-        return "" if value is None else str(value).strip()
+    def _id_key(value: int | str | None) -> str | None:
+        return normalized_news_id(value)

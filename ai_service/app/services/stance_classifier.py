@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from app.services.claim_extractor import AtomicClaim, ClaimExtractor
+from app.services.event_evolution_analyzer import EventEvolutionAnalyzer
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,29 @@ class StanceClassifier:
             (self._relevance(claim, candidate) for candidate in candidates),
             default=0.0,
         )
+
+    def compare_claims(
+        self,
+        target: AtomicClaim,
+        evidence: AtomicClaim,
+        *,
+        target_publish_time: str | None = None,
+        evidence_publish_time: str | None = None,
+    ) -> StanceDecision:
+        relevance = self._relevance(target, evidence)
+        if target.claim_type != evidence.claim_type:
+            return StanceDecision(
+                "related",
+                "related_but_not_comparable",
+                round(relevance, 3),
+            )
+        stance, reason = self._compare_same_type(
+            target,
+            evidence,
+            target_publish_time=target_publish_time,
+            evidence_publish_time=evidence_publish_time,
+        )
+        return StanceDecision(stance, reason, round(relevance, 3))
 
     @staticmethod
     def _compare_same_type(
@@ -296,7 +320,12 @@ class StanceClassifier:
         target_reference = target.slots.get("reference_time")
         evidence_reference = evidence.slots.get("reference_time")
         if isinstance(target_reference, dict) or isinstance(evidence_reference, dict):
-            order = StanceClassifier._reference_time_order(target, evidence)
+            order = StanceClassifier._reference_time_order(
+                target,
+                evidence,
+                target_publish_time,
+                evidence_publish_time,
+            )
             if order is None:
                 return "not_comparable"
             if order == 0:
@@ -396,18 +425,29 @@ class StanceClassifier:
         return bool(left and right and left == right)
 
     @staticmethod
-    def _reference_time_order(target: AtomicClaim, evidence: AtomicClaim) -> int | None:
+    def _reference_time_order(
+        target: AtomicClaim,
+        evidence: AtomicClaim,
+        target_publish_time: str | None,
+        evidence_publish_time: str | None,
+    ) -> int | None:
         left = target.slots.get("reference_time")
         right = evidence.slots.get("reference_time")
-        if not isinstance(left, dict) or not isinstance(right, dict):
+        left_resolved = EventEvolutionAnalyzer.resolve_reference_time(
+            left,
+            target_publish_time,
+        )
+        right_resolved = EventEvolutionAnalyzer.resolve_reference_time(
+            right,
+            evidence_publish_time,
+        )
+        if left_resolved is None or right_resolved is None:
             return None
-        left_key = StanceClassifier._reference_time_key(left)
-        right_key = StanceClassifier._reference_time_key(right)
-        if left_key is None or right_key is None or left_key[0] != right_key[0]:
+        if left_resolved.sort_key[0] != right_resolved.sort_key[0]:
             return None
-        if right_key[1] == left_key[1]:
+        if right_resolved.sort_key == left_resolved.sort_key:
             return 0
-        return 1 if right_key[1] > left_key[1] else -1
+        return 1 if right_resolved.sort_key > left_resolved.sort_key else -1
 
     @staticmethod
     def _reference_time_key(value: dict) -> tuple[str, tuple[int, ...]] | None:
