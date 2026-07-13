@@ -57,6 +57,22 @@ class Settings:
     verify_article_max_chars: int = field(
         default_factory=lambda: _positive_int("AI_VERIFY_ARTICLE_MAX_CHARS", 5000)
     )
+    evidence_graph_max_articles: int = field(
+        default_factory=lambda: _positive_int("AI_EVIDENCE_GRAPH_MAX_ARTICLES", 50)
+    )
+    evidence_graph_max_claims_per_article: int = field(
+        default_factory=lambda: _positive_int(
+            "AI_EVIDENCE_GRAPH_MAX_CLAIMS_PER_ARTICLE", 5
+        )
+    )
+    evidence_graph_max_edges: int = field(
+        default_factory=lambda: _positive_int("AI_EVIDENCE_GRAPH_MAX_EDGES", 500)
+    )
+    evidence_graph_article_max_chars: int = field(
+        default_factory=lambda: _positive_int(
+            "AI_EVIDENCE_GRAPH_ARTICLE_MAX_CHARS", 5000
+        )
+    )
     llm_provider: str = field(default_factory=lambda: os.getenv("AI_LLM_PROVIDER", "fake"))
     deepseek_api_key: str = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY", ""))
     deepseek_base_url: str = field(
