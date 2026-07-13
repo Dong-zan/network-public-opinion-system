@@ -13,6 +13,7 @@ class Settings(BaseSettings):
 
     MYSQL_DATABASE:str
 
+    AI_SERVER_URL:str
 
     APP_NAME:str
 
