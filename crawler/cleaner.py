@@ -11,6 +11,7 @@
   URL 精确匹配 → 判为重复（不再使用内容哈希，保留不同来源的相似内容）
 """
 
+import html
 import json
 import os
 import re
@@ -128,16 +129,17 @@ def clean_article(article: dict) -> dict | None:
     if text.count("更多+") > 3:
         return None
 
+    # HTML 实体解码：用户可见文本字段，防止 &amp; &lt; &gt; &quot; 等原样入库
     return {
-        "title": title,
-        "content": text,
+        "title": html.unescape(title),
+        "content": html.unescape(text),
         "source": article.get("source", ""),
         "url": article.get("url", ""),
         "publish_time": publish_time,
         "platform": article.get("platform", ""),
-        "author": article.get("author", ""),
+        "author": html.unescape(article.get("author", "")),
         "account_id": article.get("account_id", ""),
-        "account_name": article.get("account_name", ""),
+        "account_name": html.unescape(article.get("account_name", "")),
         "account_type": article.get("account_type", ""),
         "is_official": article.get("is_official", False),
         "crawl_time": article.get("crawl_time", ""),
