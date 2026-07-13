@@ -20,12 +20,20 @@ class User(Base):
 
     username=Column(
         String(50),
-        unique=True
+        unique=True,
+        nullable=False
+    )
+
+
+    nickname=Column(
+        String(50),
+        nullable=False
     )
 
 
     password=Column(
-        String(100)
+        String(255),
+        nullable=False
     )
 
 
