@@ -89,22 +89,24 @@ class EventHeatServiceTests(unittest.TestCase):
 
         heat = EventHeatService(db).update_event_heat(event.event_id)
 
-        self.assertAlmostEqual(heat, 18.75)
+        self.assertAlmostEqual(heat, 20.0)
         db.refresh(event)
-        self.assertAlmostEqual(event.heat, 18.75)
+        self.assertAlmostEqual(event.heat, 20.0)
         db.close()
 
-    def test_second_article_changes_event_heat(self):
+    def test_low_heat_article_does_not_reduce_event_heat(self):
         db = self.Session()
         event = self._create_event(db)
-        self._add_news(db, event.event_id, heat_score=20, negative=0.1)
+        self._add_news(db, event.event_id, heat_score=21, negative=0)
+        self._add_news(db, event.event_id, heat_score=21, negative=0)
+        self._add_news(db, event.event_id, heat_score=20, negative=0)
         service = EventHeatService(db)
-        first_heat = service.update_event_heat(event.event_id)
+        initial_heat = service.update_event_heat(event.event_id)
 
-        self._add_news(db, event.event_id, heat_score=60, negative=0.3)
-        second_heat = service.update_event_heat(event.event_id)
+        self._add_news(db, event.event_id, heat_score=1, negative=0)
+        updated_heat = service.update_event_heat(event.event_id)
 
-        self.assertNotEqual(first_heat, second_heat)
+        self.assertGreaterEqual(updated_heat, initial_heat)
         db.close()
 
     def test_high_heat_article_increases_event_heat(self):
@@ -120,18 +122,40 @@ class EventHeatServiceTests(unittest.TestCase):
         self.assertGreater(updated_heat, initial_heat)
         db.close()
 
-    def test_low_heat_article_does_not_exceed_upper_bound(self):
+    def test_more_articles_increase_volume_component(self):
         db = self.Session()
         event = self._create_event(db)
-        self._add_news(db, event.event_id, heat_score=100, negative=1)
+        self._add_news(
+            db,
+            event.event_id,
+            heat_score=None,
+            with_analysis=False,
+        )
         service = EventHeatService(db)
-        service.update_event_heat(event.event_id)
+        one_article_heat = service.update_event_heat(event.event_id)
 
-        self._add_news(db, event.event_id, heat_score=1, negative=0)
-        updated_heat = service.update_event_heat(event.event_id)
+        self._add_news(
+            db,
+            event.event_id,
+            heat_score=None,
+            with_analysis=False,
+        )
+        two_article_heat = service.update_event_heat(event.event_id)
 
-        self.assertGreaterEqual(updated_heat, 0)
-        self.assertLessEqual(updated_heat, 100)
+        self.assertAlmostEqual(one_article_heat, 6.0)
+        self.assertAlmostEqual(two_article_heat, 12.0)
+        self.assertGreater(two_article_heat, one_article_heat)
+        db.close()
+
+    def test_event_heat_is_limited_to_zero_and_one_hundred(self):
+        db = self.Session()
+        event = self._create_event(db)
+        self._add_news(db, event.event_id, heat_score=1000, negative=10)
+        heat = EventHeatService(db).update_event_heat(event.event_id)
+
+        self.assertGreaterEqual(heat, 0)
+        self.assertLessEqual(heat, 100)
+        self.assertEqual(heat, 100)
         db.close()
 
     def test_event_without_analysis_does_not_fail(self):
@@ -146,7 +170,7 @@ class EventHeatServiceTests(unittest.TestCase):
 
         heat = EventHeatService(db).update_event_heat(event.event_id)
 
-        self.assertAlmostEqual(heat, 3.75)
+        self.assertAlmostEqual(heat, 6.0)
         db.close()
 
 

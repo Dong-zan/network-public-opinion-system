@@ -21,7 +21,7 @@ class EventHeatService:
         ).all()
 
         article_count = len(articles)
-        volume_score = min(article_count * 5, 100)
+        volume_score = min(article_count * 10, 100)
 
         recent_cutoff = datetime.now() - timedelta(hours=24)
         recent_count = sum(
@@ -47,7 +47,7 @@ class EventHeatService:
         if heat_values:
             average_heat = sum(heat_values) / len(heat_values)
             max_heat = max(heat_values)
-            news_heat_score = 0.6 * average_heat + 0.4 * max_heat
+            news_heat_score = 0.3 * average_heat + 0.7 * max_heat
         else:
             news_heat_score = 0.0
 
@@ -63,11 +63,11 @@ class EventHeatService:
         )
         sentiment_score = negative_avg * 100
 
-        event_heat = 0.25 * (
-            volume_score
-            + velocity_score
-            + news_heat_score
-            + sentiment_score
+        event_heat = (
+            0.35 * volume_score
+            + 0.25 * velocity_score
+            + 0.30 * news_heat_score
+            + 0.10 * sentiment_score
         )
         return float(max(0.0, min(event_heat, 100.0)))
 
