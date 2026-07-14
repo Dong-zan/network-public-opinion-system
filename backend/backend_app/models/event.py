@@ -4,6 +4,7 @@ from sqlalchemy import (
     String,
     Text,
     Float,
+    Integer,
     DateTime,
     JSON
 )
@@ -76,4 +77,12 @@ class Event(Base):
 
     embedding=Column(
         JSON
+    )
+
+
+    embedding_count=Column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default="1"
     )

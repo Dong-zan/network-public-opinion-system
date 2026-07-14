@@ -1,4 +1,5 @@
 import unittest
+from math import sqrt
 
 from sqlalchemy import BigInteger, create_engine
 from sqlalchemy.ext.compiler import compiles
@@ -43,6 +44,28 @@ class EmbeddingAggregationTests(unittest.TestCase):
         db.commit()
         db.close()
 
+    def test_first_news_creates_event_with_embedding_count_one(self):
+        db = self.Session()
+        embedding = [1.0] + [0.0] * 767
+        article = Article(title="事件首篇", content="事件内容")
+        db.add(article)
+        db.flush()
+        db.add(
+            Analysis(
+                news_id=article.news_id,
+                embedding=embedding,
+                similar_news=[],
+            )
+        )
+        db.commit()
+
+        event = AggregationService(db).aggregate_article(article.news_id)
+
+        self.assertEqual(event.embedding_count, 1)
+        self.assertEqual(event.embedding, embedding)
+        self.assertEqual(len(event.embedding), 768)
+        db.close()
+
     def test_similar_news_embeddings_reuse_the_same_event(self):
         db = self.Session()
         first_embedding = [1.0] + [0.0] * 767
@@ -74,6 +97,24 @@ class EmbeddingAggregationTests(unittest.TestCase):
 
         self.assertEqual(first_event.event_id, second_event.event_id)
         self.assertEqual(db.query(Event).count(), 1)
+        db.refresh(second_event)
+        self.assertEqual(second_event.embedding_count, 2)
+        self.assertEqual(len(second_event.embedding), 768)
+        self.assertAlmostEqual(
+            sqrt(sum(value * value for value in second_event.embedding)),
+            1.0,
+        )
+
+        expected_norm = sqrt(0.995 ** 2 + 0.005 ** 2)
+        self.assertAlmostEqual(
+            second_event.embedding[0],
+            0.995 / expected_norm,
+        )
+        self.assertAlmostEqual(
+            second_event.embedding[1],
+            0.005 / expected_norm,
+        )
+        self.assertNotEqual(second_event.embedding, second_embedding)
         db.close()
 
     def test_dissimilar_news_embeddings_create_different_events(self):

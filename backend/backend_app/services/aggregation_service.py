@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from backend_app.models.analysis import Analysis
 from backend_app.models.article import Article
 from backend_app.models.event import Event
+from backend_app.services.embedding_utils import merge_embedding_center
 
 
 EVENT_SIMILARITY_THRESHOLD = 0.75
@@ -63,6 +64,7 @@ class AggregationService:
 
         if event is not None and similarity >= EVENT_SIMILARITY_THRESHOLD:
             print("复用已有事件:", event.event_id, "similarity:", similarity)
+            self._update_event_embedding(event, analysis.embedding)
         else:
             event = self._create_event(article, analysis)
             print("创建新事件:", event.event_id, "best_similarity:", similarity)
@@ -107,6 +109,7 @@ class AggregationService:
             risk_level=analysis.risk_level,
             stage=analysis.stage,
             embedding=analysis.embedding,
+            embedding_count=1,
             create_time=datetime.now(),
             update_time=datetime.now(),
         )
@@ -114,3 +117,17 @@ class AggregationService:
         self.db.commit()
         self.db.refresh(event)
         return event
+
+    @staticmethod
+    def _update_event_embedding(
+        event: Event,
+        new_embedding: list[float],
+    ) -> None:
+        old_count = event.embedding_count or 1
+        event.embedding = merge_embedding_center(
+            event.embedding,
+            old_count,
+            new_embedding,
+        )
+        event.embedding_count = old_count + 1
+        event.update_time = datetime.now()
