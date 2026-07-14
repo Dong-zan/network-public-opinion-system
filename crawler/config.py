@@ -95,8 +95,8 @@ NEWS_SOURCES = [
         "name": "weibo",                    # 内部标识
         "label": "微博",                     # 显示名称
         "hot_search_url": "https://weibo.com/ajax/side/hotSearch",
-        "topics_per_run": 40,               # 每轮取前 N 个热搜词
-        "posts_per_topic": 1,               # 每个热搜词搜几条帖子
+        "topics_per_run": 30,               # 每轮取前 N 个热搜词
+        "posts_per_topic": 3,               # 每个热搜词搜几条帖子
     },
 ]
 

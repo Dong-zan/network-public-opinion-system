@@ -374,7 +374,7 @@ def _fetch_weibo_posts(source: dict) -> List[dict]:
                     "title": title,
                     "content": text,
                     "source": source["label"],
-                    "url": f"https://weibo.com/{post.id}",
+                    "url": f"https://weibo.com/{post.user_id}/{post.bid}",
                     "publish_time": raw_time,
                     "platform": "微博",
                     "author": author,

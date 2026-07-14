@@ -182,6 +182,7 @@ class Deduplicator:
     def __init__(self, state_file: str = None):
         self.state_file = state_file or DEDUP_FILE
         self.seen_urls: Set[str] = set()
+        self.seen_hashes: Set[str] = set()
         self._load()
 
     # --- 哈希计算 ---
