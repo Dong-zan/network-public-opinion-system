@@ -25,7 +25,7 @@ class SemanticAnalysisContext:
     target_article: Article
     verification: VerificationResponse
     source_status: str
-    registered_source: bool
+    registered_source: bool | None
     domain_match: bool | None
     metadata_signals: tuple[str, ...]
     deterministic_flags: tuple[tuple[str, str], ...]
@@ -85,10 +85,20 @@ class SemanticAnalysisContext:
             },
             "claims": claims,
             "metadata": {
-                "source_status": self.source_status,
-                "registered_source": self.registered_source,
-                "domain_match": self.domain_match,
-                "metadata_signals": list(self.metadata_signals),
+                "metadata_signals": [
+                    signal
+                    for signal in self.metadata_signals
+                    if signal
+                    in {
+                        "source_present",
+                        "url_hostname_present",
+                        "publish_time_present",
+                        "author_present",
+                        "reference_urls_present",
+                        "quoted_news_ids_present",
+                        "duplicate_group_id_present",
+                    }
+                ],
                 "deterministic_language_flags": [
                     {"type": flag_type, "quote": self._escape(quote)}
                     for flag_type, quote in self.deterministic_flags
@@ -101,7 +111,11 @@ class SemanticAnalysisContext:
         return value.replace("<", "＜").replace(">", "＞")
 
 
+SEMANTIC_CREDIBILITY_VALIDATOR_VERSION = "a3.1-1"
+
+
 class SemanticCredibilityValidator:
+    VERSION = SEMANTIC_CREDIBILITY_VALIDATOR_VERSION
     _UNCERTAINTY_MARKERS = (
         "初步",
         "可能",

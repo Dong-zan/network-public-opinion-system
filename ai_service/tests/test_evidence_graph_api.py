@@ -47,13 +47,17 @@ def test_evidence_graph_api_returns_complete_top_level_structure(
     payload = response.json()
     assert set(payload) == {
         "event_id",
+        "summary",
         "nodes",
         "edges",
         "claim_clusters",
         "timeline",
         "metrics",
+        "key_findings",
         "risk_flags",
         "limitations",
+        "analysis_method",
+        "fallback_used",
     }
     assert {node["node_type"] for node in payload["nodes"]} == {
         "event",
@@ -135,10 +139,12 @@ def test_evidence_graph_limits_have_stable_defaults(monkeypatch) -> None:
 
     configured = Settings(llm_provider="fake")
 
-    assert configured.evidence_graph_max_articles == 50
+    assert configured.evidence_graph_llm_enabled is True
+    assert configured.evidence_graph_max_articles == 12
     assert configured.evidence_graph_max_claims_per_article == 5
-    assert configured.evidence_graph_max_edges == 500
-    assert configured.evidence_graph_article_max_chars == 5000
+    assert configured.evidence_graph_max_nodes == 40
+    assert configured.evidence_graph_max_edges == 60
+    assert configured.evidence_graph_article_max_chars == 6000
 
 
 def test_evidence_graph_does_not_depend_on_llm_provider(

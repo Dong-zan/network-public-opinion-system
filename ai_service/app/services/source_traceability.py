@@ -13,6 +13,9 @@ class SourceTraceabilityConfig:
     partially_verified_risk: float = 40.0
     unknown_risk: float = 50.0
     mismatch_risk: float = 75.0
+    complete_metadata_risk: float = 15.0
+    partial_metadata_risk: float = 35.0
+    sparse_metadata_risk: float = 55.0
     metadata_fields: int = 10
 
 
@@ -27,9 +30,12 @@ class SourceTraceabilityEvaluator:
 
     def evaluate(self, article: Article) -> SourceAssessment:
         hostname = self._hostname(article.url)
+        coverage = self._metadata_coverage(article, hostname)
+        if not self.registry.is_configured:
+            return self._metadata_only_assessment(article, hostname, coverage)
+
         profile = self.registry.find(article.source)
         domain_match = self._domain_match(hostname, profile.verified_domains) if profile and hostname else None
-        coverage = self._metadata_coverage(article, hostname)
         signals = self._signals(article, hostname, profile is not None, domain_match)
 
         if profile and domain_match is True:
@@ -79,6 +85,32 @@ class SourceTraceabilityEvaluator:
             domain_match=None,
             metadata_coverage=coverage,
             signals=signals,
+        )
+
+    def _metadata_only_assessment(
+        self,
+        article: Article,
+        hostname: str | None,
+        coverage: float,
+    ) -> SourceAssessment:
+        has_source = bool(article.source.strip())
+        has_publish_time = bool(article.publish_time and article.publish_time.strip())
+        if has_source and hostname and has_publish_time:
+            risk_score = self.config.complete_metadata_risk
+        elif has_source and (hostname or has_publish_time):
+            risk_score = self.config.partial_metadata_risk
+        else:
+            risk_score = self.config.sparse_metadata_risk
+        return SourceAssessment(
+            status="unknown",
+            traceability_score=None,
+            risk_score=risk_score,
+            registered_source=None,
+            canonical_name=None,
+            hostname=hostname,
+            domain_match=None,
+            metadata_coverage=coverage,
+            signals=self._signals(article, hostname, False, None),
         )
 
     @staticmethod

@@ -6,7 +6,7 @@ from app.core.news_identity import normalized_news_id
 from app.schemas.event import EventContext
 
 
-GraphNodeType = Literal["event", "article", "source", "claim"]
+GraphNodeType = Literal["event", "article", "source", "claim", "evidence"]
 GraphEdgeType = Literal[
     "contains",
     "published_by",
@@ -15,7 +15,12 @@ GraphEdgeType = Literal[
     "contradicts",
     "updates",
     "duplicates",
+    "adds_detail",
+    "same_fact",
+    "quotes",
+    "reposts",
 ]
+EvidenceGraphAnalysisMethod = Literal["llm", "deterministic_fallback"]
 ClaimClusterStatus = Literal[
     "supported",
     "conflicting",
@@ -58,6 +63,7 @@ class EvidenceGraphNode(BaseModel):
     node_id: str
     node_type: GraphNodeType
     label: str
+    description: str | None = None
     attributes: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -68,6 +74,8 @@ class EvidenceGraphEdge(BaseModel):
     edge_type: GraphEdgeType
     source_node_id: str
     target_node_id: str
+    label: str | None = None
+    explanation: str | None = None
     quote: str | None = None
     reason_code: str | None = None
     attributes: dict[str, Any] = Field(default_factory=dict)
@@ -138,10 +146,14 @@ class EvidenceGraphResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     event_id: int | str | None = None
+    summary: str = ""
     nodes: list[EvidenceGraphNode] = Field(default_factory=list)
     edges: list[EvidenceGraphEdge] = Field(default_factory=list)
     claim_clusters: list[EvidenceClaimCluster] = Field(default_factory=list)
     timeline: list[EvidenceTimelineEntry] = Field(default_factory=list)
     metrics: EvidenceGraphMetrics
+    key_findings: list[str] = Field(default_factory=list)
     risk_flags: list[str] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
+    analysis_method: EvidenceGraphAnalysisMethod = "deterministic_fallback"
+    fallback_used: bool = True

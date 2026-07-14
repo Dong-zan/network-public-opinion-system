@@ -149,6 +149,12 @@ def test_prompt_contains_complex_definitions_and_counterexamples() -> None:
     assert "初步原因指向故障" in prompt.system_prompt
     assert "事故造成3人受伤" in prompt.system_prompt
     assert "强烈表达不代表文章必然虚假" in prompt.system_prompt
+    assert "现场无明火、未发生燃烧" in prompt.system_prompt
+    assert "百分百最终确定" in prompt.system_prompt
+    assert "导致、由于、因而" in prompt.system_prompt
+    assert "禁止输出空字符串" in prompt.system_prompt
+    assert "publisher_metadata、attribution_quote、unknown" in prompt.system_prompt
+    assert "不得根据“事故原因、调查、运营”等主题词猜测角色" in prompt.system_prompt
 
 
 def test_official_enterprise_account_is_not_government_notice() -> None:

@@ -4,6 +4,10 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 
 from app.core.news_identity import normalized_news_id
 from app.schemas.event import EventContext
+from app.schemas.verification_explanation import (
+    VerificationAIExplanation,
+    VerificationDisplayResult,
+)
 
 
 VerificationVerdict = Literal[
@@ -125,12 +129,25 @@ class SourceAssessment(BaseModel):
     status: SourceAssessmentStatus
     traceability_score: float | None = Field(default=None, ge=0, le=100)
     risk_score: float = Field(ge=0, le=100)
-    registered_source: bool
+    registered_source: bool | None = None
     canonical_name: NonEmptyText | None = None
     hostname: NonEmptyText | None = None
     domain_match: bool | None = None
     metadata_coverage: float = Field(ge=0, le=100)
     signals: list[NonEmptyText] = Field(default_factory=list)
+
+
+class EvidenceSourceAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    news_id: int | str
+    source: str = ""
+    source_role: SourceRole = "unknown"
+    identity_status: SourceAssessmentStatus = "unknown"
+    registered_source: bool | None = None
+    domain_match: bool | None = None
+    metadata_coverage: float = Field(ge=0, le=100)
+    explanation: NonEmptyText
 
 
 class LanguageRiskFlag(BaseModel):
@@ -219,4 +236,9 @@ class VerificationResponse(BaseModel):
     score_explanation: NonEmptyText = (
         "evidence_score表示当前核验结论的启发式证据强度，不是文章真实性概率。"
     )
+    evidence_source_assessments: list[EvidenceSourceAssessment] = Field(
+        default_factory=list
+    )
     credibility_assessment: CredibilityAssessment | None = None
+    ai_explanation: VerificationAIExplanation | None = None
+    display_result: VerificationDisplayResult | None = None

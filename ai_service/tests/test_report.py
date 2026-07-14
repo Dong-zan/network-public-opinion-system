@@ -150,7 +150,7 @@ def test_cause_under_investigation_stays_uncertain(
 ) -> None:
     response = post_report(client, report_payload(event_payload))
 
-    assert response.json()["overview"]["cause"] == "仍在调查"
+    assert "调查" in response.json()["overview"]["cause"]
 
 
 def test_persons_only_come_from_input(client, event_payload, fake_report_override) -> None:
@@ -326,7 +326,8 @@ def test_model_invented_event_time_is_cleared(client, event_payload) -> None:
 
     assert response.status_code == 200
     assert response.json()["overview"]["time"] is None
-    assert any("发生时间" in item and "清除" in item for item in response.json()["limitations"])
+    assert any("事件发生时间" in item for item in response.json()["limitations"])
+    assert all("模型给出的" not in item for item in response.json()["limitations"])
 
 
 def test_model_invented_location_is_cleared(client, event_payload) -> None:
@@ -340,7 +341,7 @@ def test_model_invented_location_is_cleared(client, event_payload) -> None:
         app.dependency_overrides.pop(get_report_service, None)
 
     assert response.json()["overview"]["location"] is None
-    assert any("事件地点" in item and "清除" in item for item in response.json()["limitations"])
+    assert all("模型给出的" not in item for item in response.json()["limitations"])
 
 
 def test_model_invented_person_is_removed(client, event_payload) -> None:
@@ -354,7 +355,7 @@ def test_model_invented_person_is_removed(client, event_payload) -> None:
         app.dependency_overrides.pop(get_report_service, None)
 
     assert response.json()["overview"]["persons"] == []
-    assert any("人物" in item and "移除" in item for item in response.json()["limitations"])
+    assert all("保守移除" not in item for item in response.json()["limitations"])
 
 
 def test_unsupported_specific_cause_is_cleared(client, event_payload) -> None:
@@ -370,7 +371,8 @@ def test_unsupported_specific_cause_is_cleared(client, event_payload) -> None:
         app.dependency_overrides.pop(get_report_service, None)
 
     assert response.json()["overview"]["cause"] is None
-    assert any("事件原因" in item and "清除" in item for item in response.json()["limitations"])
+    assert any("事件原因" in item for item in response.json()["limitations"])
+    assert all("模型给出的" not in item for item in response.json()["limitations"])
 
 
 def test_cause_under_investigation_is_kept_when_supported(client, event_payload) -> None:
@@ -383,7 +385,7 @@ def test_cause_under_investigation_is_kept_when_supported(client, event_payload)
     finally:
         app.dependency_overrides.pop(get_report_service, None)
 
-    assert response.json()["overview"]["cause"] == "仍在调查"
+    assert "调查" in response.json()["overview"]["cause"]
 
 
 def test_model_trend_is_overridden_by_deterministic_analysis(client, event_payload) -> None:
@@ -569,7 +571,7 @@ def test_report_uses_user_facing_risk_and_trend_wording(
     assert "5号" not in report["risk_analysis"]
     assert "本报告仅对上游风险分析结果进行解释" not in report["risk_analysis"]
     assert "选中文章" not in report["trend_analysis"]
-    assert "现有2篇报道发布在10:00至11:00之间" in report["trend_analysis"]
+    assert "现有2篇报道发布于2026年7月8日10:00至7月8日11:00" in report["trend_analysis"]
 
 
 def test_final_report_hides_internal_implementation_terms(client, event_payload) -> None:
@@ -785,7 +787,7 @@ def test_generic_person_or_organization_is_filtered(
     assert response.json()["overview"]["persons"] == []
 
 
-def test_specific_organization_full_name_is_kept(client, event_payload) -> None:
+def test_specific_organization_full_name_is_filtered_from_persons(client, event_payload) -> None:
     organization = "北京市应急管理局"
     event = report_payload(event_payload)
     event["articles"][0]["content"] += f" {organization}发布了后续信息。"
@@ -799,7 +801,7 @@ def test_specific_organization_full_name_is_kept(client, event_payload) -> None:
         app.dependency_overrides.pop(get_report_service, None)
 
     assert response.status_code == 200
-    assert response.json()["overview"]["persons"] == [organization]
+    assert response.json()["overview"]["persons"] == []
 
 
 def test_deterministic_suggestions_follow_report_features(

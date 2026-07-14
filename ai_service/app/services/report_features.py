@@ -151,12 +151,12 @@ def _article_focus(content: str) -> list[str]:
 def _critical_information_gaps(contents: list[str]) -> list[str]:
     text = " ".join(contents)
     gaps = []
-    if any(marker in text for marker in ("原因仍在调查", "具体原因仍在调查", "原因尚在调查")):
+    if any(marker in text for marker in ("原因仍在调查", "具体原因仍在调查", "具体原因仍在进一步调查", "原因尚在调查")):
         gaps.append("事件原因仍待调查")
-    elif not any(marker in text for marker in ("原因是", "由于", "因")):
+    elif not any(marker in text for marker in ("原因是", "由于", "因", "初步排查显示", "初步原因", "有关")):
         gaps.append("事件原因尚未说明")
 
-    location_pattern = r"(?:事发于|发生在|位于)\s*[\u4e00-\u9fff]{2,16}(?:省|市|区|县|镇|村|路|街道|机场|车站|学校|医院)"
+    location_pattern = r"(?:事发于|发生在|位于|发生地点为|事故地点为|事发地点为|事故地点是|事发地是|地点位于)\s*[\u4e00-\u9fff]{2,32}(?:省|市|区|县|镇|村|路|街道|机场|车站|学校|医院|产业园|园区|电站)"
     if not re.search(location_pattern, text):
         gaps.append("事件地点尚未明确")
 
@@ -168,17 +168,11 @@ def _critical_information_gaps(contents: list[str]) -> list[str]:
     elif "最终调查结论" not in text and "调查结论" not in text:
         gaps.append("最终调查结论尚未提供")
 
-    entity_pattern = r"[\u4e00-\u9fff]{2,12}(?:人民政府|公安局|应急管理局|消防救援支队|消防救援队|医院|学校|公司|委员会|协会|中心|研究院|集团|部门)"
-    generic_entities = {
-        "相关部门",
-        "有关部门",
-        "有关方面",
-        "工作人员",
-        "相关人员",
-        "当地部门",
-    }
-    entities = re.findall(entity_pattern, text)
-    if not any(entity not in generic_entities for entity in entities):
+    person_patterns = (
+        r"(?:负责人|记者|发言人|驾驶员|组织者)\s*[\u4e00-\u9fff]{2,4}(?=组织|表示|介绍|称|带领|负责|[，。；])",
+        r"[\u4e00-\u9fff]{2,4}(?:组织|带领|表示|介绍|称|负责)",
+    )
+    if not any(re.search(pattern, text) for pattern in person_patterns):
         gaps.append("具体涉事人物或机构尚未明确")
     return _stable_unique(gaps)
 

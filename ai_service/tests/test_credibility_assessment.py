@@ -54,6 +54,7 @@ def test_new_article_fields_are_optional_and_response_is_backward_compatible() -
     assert parsed_article.quoted_news_ids == []
     assert parsed_article.author is None
     assert legacy.credibility_assessment is None
+    assert legacy.ai_explanation is None
 
 
 def test_single_verified_source_stays_insufficient_and_not_low_risk() -> None:
@@ -73,6 +74,46 @@ def test_unknown_source_is_neutral_not_high_by_itself() -> None:
     assert source.status == "unknown"
     assert source.risk_score == 50
     assert source.risk_score != 100
+
+
+def test_unconfigured_registry_uses_metadata_without_registration_penalty() -> None:
+    target = Article.model_validate(
+        article(1, "事故造成3人受伤。", "滨江发布", "https://example.com/1")
+    )
+
+    source = SourceTraceabilityEvaluator().evaluate(target)
+
+    assert source.status == "unknown"
+    assert source.registered_source is None
+    assert source.domain_match is None
+    assert source.risk_score == 15
+
+
+def test_missing_real_source_metadata_increases_source_risk() -> None:
+    complete = Article.model_validate(
+        article(1, "事故造成3人受伤。", "滨江发布", "https://example.com/1")
+    )
+    sparse = Article.model_validate(
+        article(
+            2,
+            "事故造成3人受伤。",
+            "",
+            "",
+            publish_time=None,
+        )
+    )
+    evaluator = SourceTraceabilityEvaluator()
+
+    assert evaluator.evaluate(complete).risk_score < evaluator.evaluate(sparse).risk_score
+
+
+def test_credibility_scoring_version_marks_metadata_only_source_logic() -> None:
+    result = VerificationService().verify(
+        event([article(1, "事故造成3人受伤。", "滨江发布", "https://example.com/1")]),
+        1,
+    )
+
+    assert result.credibility_assessment.version == "credibility-risk-v1.1"
 
 
 def test_registry_name_with_wrong_domain_is_mismatch_and_example_com_not_verified() -> None:

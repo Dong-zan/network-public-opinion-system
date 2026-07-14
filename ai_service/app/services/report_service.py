@@ -1,5 +1,8 @@
 import json
+import logging
 import re
+import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
 
@@ -15,8 +18,52 @@ from app.schemas.report import EventOverview, ReportResponse
 from app.services.report_features import ReportFeatures, extract_report_features
 
 
+logger = logging.getLogger(__name__)
+
+
 class ReportGenerationError(LLMProviderError):
     """Raised when a provider response cannot produce a valid report."""
+
+
+@dataclass(frozen=True)
+class GroundingDecision:
+    """Internal, non-user-visible explanation for a grounded overview value."""
+
+    value: str | None
+    reason_code: str | None = None
+
+
+@dataclass(frozen=True)
+class EventTimeCandidate:
+    year: int | None
+    month: int | None
+    day: int | None
+    hour: int | None
+    minute: int | None
+    day_period: str | None
+    precision: int
+    news_id: int | str | None
+    quote: str
+    normalized_datetime: str
+    display: str
+
+
+@dataclass(frozen=True)
+class LocationCandidate:
+    normalized_name: str
+    components: tuple[str, ...]
+    precision: int
+    news_id: int | str | None
+    quote: str
+
+
+@dataclass(frozen=True)
+class CauseCandidate:
+    cause_text: str | None
+    normalized_subject: str | None
+    status: str
+    investigation_ongoing: bool
+    evidence: tuple[tuple[int | str | None, str], ...]
 
 
 class ReportService:
@@ -38,25 +85,56 @@ class ReportService:
         if self.provider.name == "fake":
             return self._build_fake_report(event, articles)
 
-        raw_output = self._generate_safely(
-            build_report_prompt(event, articles, self.article_max_chars)
-        )
+        initial_prompt = build_report_prompt(event, articles, self.article_max_chars)
+        raw_output = self._generate_safely(initial_prompt, articles, repair=False)
         try:
             parsed_report = self._parse_report(raw_output)
             return self._finalize_report(event, articles, parsed_report)
-        except (json.JSONDecodeError, ValidationError, TypeError, ValueError):
-            repaired_output = self._generate_safely(
-                build_report_repair_prompt(
-                    event,
-                    articles,
-                    self.article_max_chars,
-                    raw_output,
-                )
+        except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
+            self._log_report_parse_failure(
+                phase="initial",
+                exc=exc,
+                articles=articles,
+                raw_output_chars=len(raw_output),
+                repair=False,
             )
+            repair_prompt = build_report_repair_prompt(
+                event,
+                articles,
+                self.article_max_chars,
+                raw_output,
+            )
+            logger.info(
+                "report_repair_started provider=%s model=%s selected_article_count=%s "
+                "selected_article_content_lengths=%s system_prompt_chars=%s user_prompt_chars=%s "
+                "raw_output_chars=%s repair=%s",
+                self._provider_name(),
+                self._provider_model(),
+                len(articles),
+                self._article_content_lengths(articles),
+                len(repair_prompt.system_prompt),
+                len(repair_prompt.user_prompt),
+                len(raw_output),
+                True,
+            )
+            repaired_output = self._generate_safely(repair_prompt, articles, repair=True)
             try:
                 parsed_report = self._parse_report(repaired_output)
                 return self._finalize_report(event, articles, parsed_report)
             except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
+                self._log_report_parse_failure(
+                    phase="repair",
+                    exc=exc,
+                    articles=articles,
+                    raw_output_chars=len(repaired_output),
+                    repair=True,
+                )
+                self._log_report_exception(
+                    "report_generation_failed",
+                    exc,
+                    articles=articles,
+                    repair=True,
+                )
                 raise ReportGenerationError("Report output validation failed") from exc
 
     def select_report_articles(self, articles: list[Article]) -> list[Article]:
@@ -90,18 +168,191 @@ class ReportService:
                 selected.append(article)
         return self._sort_by_publish_time(selected)
 
-    def _generate_safely(self, prompt: PromptBundle) -> str:
+    def _generate_safely(
+        self,
+        prompt: PromptBundle,
+        articles: list[Article],
+        *,
+        repair: bool,
+    ) -> str:
+        started = time.perf_counter()
         try:
             response = self.provider.generate(prompt)
-        except LLMProviderError:
+        except LLMProviderError as exc:
+            self._log_report_exception(
+                "report_provider_call_failed",
+                exc,
+                articles=articles,
+                prompt=prompt,
+                repair=repair,
+                provider_call_ms=round((time.perf_counter() - started) * 1000, 2),
+            )
             raise
         except (TimeoutError, ConnectionError) as exc:
-            raise LLMProviderUnavailableError("Report provider is unavailable") from exc
+            mapped = LLMProviderUnavailableError("Report provider is unavailable")
+            mapped.diagnostic_category = (
+                "provider_timeout" if isinstance(exc, TimeoutError) else "provider_connection"
+            )
+            self._log_report_exception(
+                "report_provider_call_failed",
+                mapped,
+                articles=articles,
+                prompt=prompt,
+                repair=repair,
+                provider_call_ms=round((time.perf_counter() - started) * 1000, 2),
+            )
+            raise mapped from exc
         except Exception as exc:
-            raise ReportGenerationError("Report provider failed") from exc
+            mapped = ReportGenerationError("Report provider failed")
+            mapped.diagnostic_category = "provider_unexpected_error"
+            self._log_report_exception(
+                "report_provider_call_failed",
+                mapped,
+                articles=articles,
+                prompt=prompt,
+                repair=repair,
+                provider_call_ms=round((time.perf_counter() - started) * 1000, 2),
+            )
+            raise mapped from exc
         if not isinstance(response, str) or not response.strip():
-            raise ReportGenerationError("Report provider returned an empty response")
-        return response.strip()
+            exc = ReportGenerationError("Report provider returned an empty response")
+            exc.diagnostic_category = "provider_empty_response"
+            self._log_report_exception(
+                "report_provider_call_failed",
+                exc,
+                articles=articles,
+                prompt=prompt,
+                repair=repair,
+                provider_call_ms=round((time.perf_counter() - started) * 1000, 2),
+            )
+            raise exc
+        response = response.strip()
+        metadata = self._provider_response_metadata()
+        logger.info(
+            "report_provider_call_succeeded provider=%s model=%s selected_article_count=%s "
+            "selected_article_content_lengths=%s system_prompt_chars=%s user_prompt_chars=%s "
+            "provider_call_ms=%s raw_output_chars=%s repair=%s finish_reason=%s token_usage=%s",
+            self._provider_name(),
+            self._provider_model(),
+            len(articles),
+            self._article_content_lengths(articles),
+            len(prompt.system_prompt),
+            len(prompt.user_prompt),
+            round((time.perf_counter() - started) * 1000, 2),
+            len(response),
+            repair,
+            metadata.get("finish_reason"),
+            metadata.get("token_usage"),
+        )
+        return response
+
+    def _log_report_parse_failure(
+        self,
+        *,
+        phase: str,
+        exc: Exception,
+        articles: list[Article],
+        raw_output_chars: int,
+        repair: bool,
+    ) -> None:
+        base = {
+            "provider": self._provider_name(),
+            "model": self._provider_model(),
+            "selected_article_count": len(articles),
+            "selected_article_content_lengths": self._article_content_lengths(articles),
+            "raw_output_chars": raw_output_chars,
+            "repair": repair,
+            "phase": phase,
+        }
+        if isinstance(exc, json.JSONDecodeError):
+            logger.warning(
+                "report_json_decode_failed provider=%(provider)s model=%(model)s "
+                "selected_article_count=%(selected_article_count)s "
+                "selected_article_content_lengths=%(selected_article_content_lengths)s "
+                "raw_output_chars=%(raw_output_chars)s repair=%(repair)s phase=%(phase)s "
+                "exception_type=%(exception_type)s json_line=%(json_line)s json_column=%(json_column)s json_position=%(json_position)s",
+                {
+                    **base,
+                    "exception_type": type(exc).__name__,
+                    "json_line": exc.lineno,
+                    "json_column": exc.colno,
+                    "json_position": exc.pos,
+                },
+            )
+            return
+        if isinstance(exc, ValidationError):
+            paths = [
+                {"path": ".".join(str(part) for part in error.get("loc", ())), "type": error.get("type")}
+                for error in exc.errors()
+            ]
+            logger.warning(
+                "report_schema_validation_failed provider=%(provider)s model=%(model)s "
+                "selected_article_count=%(selected_article_count)s "
+                "selected_article_content_lengths=%(selected_article_content_lengths)s "
+                "raw_output_chars=%(raw_output_chars)s repair=%(repair)s phase=%(phase)s "
+                "exception_type=%(exception_type)s validation_errors=%(validation_errors)s",
+                {**base, "exception_type": type(exc).__name__, "validation_errors": paths},
+            )
+            return
+        self._log_report_exception(
+            "report_output_processing_failed",
+            exc,
+            articles=articles,
+            repair=repair,
+            raw_output_chars=raw_output_chars,
+            phase=phase,
+        )
+
+    def _log_report_exception(
+        self,
+        message: str,
+        exc: Exception,
+        *,
+        articles: list[Article],
+        prompt: PromptBundle | None = None,
+        repair: bool,
+        raw_output_chars: int | None = None,
+        phase: str | None = None,
+        provider_call_ms: float | None = None,
+    ) -> None:
+        safe_exception = RuntimeError(type(exc).__name__)
+        logger.exception(
+            "%s provider=%s model=%s selected_article_count=%s "
+            "selected_article_content_lengths=%s system_prompt_chars=%s user_prompt_chars=%s "
+            "provider_call_ms=%s raw_output_chars=%s repair=%s phase=%s exception_type=%s "
+            "diagnostic_category=%s provider_status_code=%s",
+            message,
+            self._provider_name(),
+            self._provider_model(),
+            len(articles),
+            self._article_content_lengths(articles),
+            len(prompt.system_prompt) if prompt is not None else None,
+            len(prompt.user_prompt) if prompt is not None else None,
+            provider_call_ms,
+            raw_output_chars,
+            repair,
+            phase,
+            type(exc).__name__,
+            getattr(exc, "diagnostic_category", "report_processing"),
+            getattr(exc, "provider_status_code", None),
+            exc_info=(RuntimeError, safe_exception, exc.__traceback__),
+        )
+
+    def _provider_name(self) -> str:
+        return str(getattr(self.provider, "name", "unknown"))
+
+    def _provider_model(self) -> str | None:
+        config = getattr(self.provider, "config", None)
+        model = getattr(config, "deepseek_model", None)
+        return str(model) if model else None
+
+    @staticmethod
+    def _article_content_lengths(articles: list[Article]) -> list[int]:
+        return [len(article.content) for article in articles]
+
+    def _provider_response_metadata(self) -> dict[str, object]:
+        metadata = getattr(self.provider, "last_response_metadata", None)
+        return metadata if isinstance(metadata, dict) else {}
 
     @staticmethod
     def _parse_report(raw_output: str) -> ReportResponse:
@@ -123,12 +374,13 @@ class ReportService:
         event: EventContext,
         articles: list[Article],
     ) -> ReportResponse:
-        contents = self._usable_contents(articles)
         features = extract_report_features(event, articles)
-        event_time, time_conflict = self._extract_event_time(contents)
-        location = self._extract_location(contents)
-        cause = self._extract_cause(contents)
-        persons = self._extract_persons(contents)
+        event_time = self._ground_event_time(None, articles).value
+        location = self._ground_location(None, articles).value
+        cause = self._ground_cause(None, articles).value
+        persons = self._natural_person_values(articles)
+        time_conflict = self._has_time_conflict(articles)
+        contents = self._usable_contents(articles)
         conflict = self._has_explicit_conflict(contents)
 
         overview_summary = self._overview_summary(event, articles)
@@ -184,46 +436,29 @@ class ReportService:
         limitations = []
         overview = parsed_report.overview
 
-        supported_times = self._event_time_values(contents)
-        time_conflict = len(supported_times) > 1
-        event_time = overview.time if overview.time in supported_times else None
-        if overview.time is not None and event_time is None:
-            limitations.append("模型给出的事件发生时间缺少现有报道正文支持，已保守清除。")
-        if event_time is None and not any("事件发生时间" in item for item in limitations):
+        time_decision = self._ground_event_time(overview.time, articles)
+        event_time = time_decision.value
+        if event_time is None:
             limitations.append(
                 "不同材料对事件发生时间的表述存在冲突。"
-                if time_conflict
+                if self._has_time_conflict(articles)
                 else "当前缺少可从文章正文确认的事件发生时间。"
             )
 
-        supported_locations = self._location_values(contents)
-        location = overview.location if overview.location in supported_locations else None
-        if overview.location is not None and location is None:
-            limitations.append("模型给出的事件地点缺少现有报道正文支持，已保守清除。")
-        if location is None and not any("事件地点" in item for item in limitations):
+        location_decision = self._ground_location(overview.location, articles)
+        location = location_decision.value
+        if location is None:
             limitations.append("当前材料未提供可确认的事件地点。")
 
-        persons = []
-        for person in overview.persons:
-            normalized = person.strip()
-            if (
-                normalized
-                and any(normalized in content for content in contents)
-                and self._is_specific_person_or_org(normalized)
-                and normalized not in persons
-            ):
-                persons.append(normalized)
-        if len(persons) < len(overview.persons):
-            limitations.append("部分人物、机构或组织缺少现有报道正文支持，已保守移除。")
-
-        cause = self._ground_cause(overview.cause, contents)
-        if overview.cause is not None and cause is None:
-            limitations.append("模型给出的事件原因缺少现有报道正文支持，已保守清除。")
+        persons = self._ground_persons(overview.persons, articles)
+        cause_decision = self._ground_cause(overview.cause, articles)
+        cause = cause_decision.value
 
         limitations = self._report_limitations(
             features,
             event_time=event_time,
             location=location,
+            cause=cause,
         ) + limitations
 
         payload = parsed_report.model_dump()
@@ -373,11 +608,21 @@ class ReportService:
         )
         if timed_count >= 2 and features.report_start_time and features.report_end_time:
             start = ReportService._display_report_time(features.report_start_time)
-            end = ReportService._display_report_time(features.report_end_time)
+            start_parsed = ReportService._parse_time(features.report_start_time)
+            end_parsed = ReportService._parse_time(features.report_end_time)
+            end = ReportService._display_report_time(
+                features.report_end_time,
+                include_year=not (
+                    start_parsed is not None
+                    and end_parsed is not None
+                    and start_parsed.year == end_parsed.year
+                ),
+            )
             span = features.report_span_minutes or 0
             concentration = "时间较为集中" if span <= 360 else "分布跨越较长时段"
             return (
-                f"现有{timed_count}篇报道发布在{start}至{end}之间，跨度{span}分钟，"
+                f"现有{timed_count}篇报道发布于{start}至{end}，时间跨度约"
+                f"{ReportService._format_duration(span)}，"
                 f"{concentration}，反映这一时段的报道活跃度；报道活跃度不等同于真实舆情热度。"
             )
         if timed_count == 1:
@@ -386,6 +631,15 @@ class ReportService:
                 "不能据此判断报道活跃度或真实舆情热度变化。"
             )
         return "现有报道缺少有效发布时间，暂无法分析报道时间分布。"
+
+    @staticmethod
+    def _format_duration(minutes: int) -> str:
+        hours, remainder = divmod(max(minutes, 0), 60)
+        if hours and remainder:
+            return f"{hours}小时{remainder}分钟"
+        if hours:
+            return f"{hours}小时"
+        return f"{remainder}分钟"
 
     @staticmethod
     def _content_evolution_text(features: ReportFeatures) -> str:
@@ -427,6 +681,7 @@ class ReportService:
         *,
         event_time: str | None,
         location: str | None,
+        cause: str | None,
     ) -> list[str]:
         limitations = []
         missing_facts = []
@@ -446,7 +701,9 @@ class ReportService:
             "报道数量和信息覆盖仍然有限。"
         )
         gaps = " ".join(features.critical_information_gaps)
-        if "原因" in gaps and "最终调查结论" in gaps:
+        if cause and "最终调查结论" in gaps:
+            limitations.append("现有材料已提供初步原因，但最终调查结论尚未正式公布。")
+        elif "原因" in gaps and "最终调查结论" in gaps:
             limitations.append("现有材料显示事件原因和最终调查结论仍未明确。")
         elif "原因" in gaps:
             limitations.append("现有材料显示事件原因仍未明确。")
@@ -503,7 +760,7 @@ class ReportService:
                 break
             if fallback not in suggestions:
                 suggestions.append(fallback)
-        return ReportService._stable_unique(suggestions)[:5]
+        return ReportService._semantic_unique_suggestions(suggestions)[:5]
 
     @staticmethod
     def _join_chinese_items(values: list[str]) -> str:
@@ -537,9 +794,12 @@ class ReportService:
         return f"{display:g}%"
 
     @staticmethod
-    def _display_report_time(value: str) -> str:
+    def _display_report_time(value: str, *, include_year: bool = True) -> str:
         parsed = ReportService._parse_time(value)
-        return parsed.strftime("%H:%M") if parsed is not None else value
+        if parsed is None:
+            return value
+        prefix = f"{parsed.year}年" if include_year else ""
+        return f"{prefix}{parsed.month}月{parsed.day}日{parsed.hour:02d}:{parsed.minute:02d}"
 
     @staticmethod
     def _sentiment_text(sentiment: Sentiment | None) -> str:
@@ -557,86 +817,332 @@ class ReportService:
         return "情感分布为" + "、".join(values) if values else ""
 
     @staticmethod
-    def _extract_event_time(contents: list[str]) -> tuple[str | None, bool]:
-        unique = ReportService._event_time_values(contents)
-        return (unique[0], False) if len(unique) == 1 else (None, len(unique) > 1)
+    def _event_time_candidates(articles: list[Article]) -> list[EventTimeCandidate]:
+        candidates: list[EventTimeCandidate] = []
+        pattern = re.compile(
+            r"(?:(?P<year>\d{4})年)?(?P<month>\d{1,2})月(?P<day>\d{1,2})日"
+            r"\s*(?P<period>凌晨|早晨|上午|中午|下午|傍晚|晚上)?\s*"
+            r"(?P<hour>\d{1,2})(?:时|点)(?:(?P<minute>\d{1,2})分?)?"
+        )
+        for article in articles:
+            content = ReportService._safe_snippet(article.content)
+            if not content:
+                continue
+            for sentence in re.split(r"(?<=[。！？；])", content):
+                for match in pattern.finditer(sentence):
+                    clause_start = max(sentence.rfind("，", 0, match.start()), sentence.rfind(",", 0, match.start())) + 1
+                    clause_end_candidates = [position for position in (sentence.find("，", match.end()), sentence.find(",", match.end())) if position >= 0]
+                    clause_end = min(clause_end_candidates) if clause_end_candidates else len(sentence)
+                    clause = sentence[clause_start:clause_end]
+                    event_markers = ("发生", "事发", "出现", "报警", "停运", "事故")
+                    is_leading_event_time = not sentence[:match.start()].strip(" ，,") and any(
+                        marker in sentence[match.end():] for marker in event_markers
+                    )
+                    if not is_leading_event_time and not any(marker in clause for marker in event_markers):
+                        continue
+                    candidate = ReportService._make_time_candidate(
+                        match.group(0),
+                        article.news_id,
+                        sentence.strip(),
+                    )
+                    if candidate is not None:
+                        candidates.append(candidate)
+        return ReportService._stable_candidate_unique(candidates, lambda item: (item.normalized_datetime, item.news_id))
 
     @staticmethod
-    def _event_time_values(contents: list[str]) -> list[str]:
+    def _make_time_candidate(
+        value: str,
+        news_id: int | str | None,
+        quote: str,
+    ) -> EventTimeCandidate | None:
+        components = ReportService._time_components(value)
+        if components is None:
+            return None
+        year, month, day, hour, minute, period = components
+        precision = sum(part is not None for part in (year, month, day, hour, minute))
+        normalized = "-".join(
+            "" if part is None else f"{part:02d}"
+            for part in (year, month, day, hour, minute)
+        )
+        return EventTimeCandidate(
+            year=year,
+            month=month,
+            day=day,
+            hour=hour,
+            minute=minute,
+            day_period=period,
+            precision=precision,
+            news_id=news_id,
+            quote=quote,
+            normalized_datetime=normalized,
+            display=value.strip(),
+        )
+
+    @staticmethod
+    def _time_components(value: str) -> tuple[int | None, int | None, int | None, int | None, int | None, str | None] | None:
+        text = value.strip()
+        iso = re.search(r"(?:(?P<year>\d{4})-)?(?P<month>\d{1,2})-(?P<day>\d{1,2})\s+(?P<hour>\d{1,2}):(?P<minute>\d{1,2})", text)
+        chinese = re.search(
+            r"(?:(?P<year>\d{4})年)?(?P<month>\d{1,2})月(?P<day>\d{1,2})日"
+            r"\s*(?P<period>凌晨|早晨|上午|中午|下午|傍晚|晚上)?\s*"
+            r"(?P<hour>\d{1,2})(?:时|点)(?:(?P<minute>\d{1,2})分?)?",
+            text,
+        )
+        match = iso or chinese
+        if match is None:
+            return None
+        values = match.groupdict()
+        try:
+            year = int(values["year"]) if values.get("year") else None
+            month = int(values["month"])
+            day = int(values["day"])
+            hour = int(values["hour"])
+            minute = int(values["minute"]) if values.get("minute") else 0
+        except (TypeError, ValueError):
+            return None
+        if not 1 <= month <= 12 or not 1 <= day <= 31 or not 0 <= hour <= 23 or not 0 <= minute <= 59:
+            return None
+        period = values.get("period")
+        hour = ReportService._normalize_day_period_hour(hour, period)
+        if hour is None:
+            return None
+        return year, month, day, hour, minute, period
+
+    @staticmethod
+    def _normalize_day_period_hour(hour: int, period: str | None) -> int | None:
+        if hour < 0 or hour > 23:
+            return None
+        if period in {"下午", "傍晚", "晚上"} and 1 <= hour <= 11:
+            return hour + 12
+        if period == "中午" and 1 <= hour <= 11:
+            return hour + 12
+        if period in {"凌晨", "早晨", "上午"} and hour == 12:
+            return 0
+        return hour
+
+    @classmethod
+    def _ground_event_time(
+        cls,
+        model_value: str | None,
+        articles: list[Article],
+    ) -> GroundingDecision:
+        candidates = cls._event_time_candidates(articles)
+        if not candidates:
+            return GroundingDecision(None, "time_no_candidate")
+        if model_value is None:
+            candidate = max(candidates, key=lambda item: (item.precision, -len(item.display)))
+            return GroundingDecision(candidate.display)
+        model_components = cls._time_components(model_value)
+        if model_components is None:
+            return GroundingDecision(None, "time_normalization_mismatch")
+        compatible = [
+            candidate
+            for candidate in candidates
+            if cls._time_components_compatible(model_components, (
+                candidate.year, candidate.month, candidate.day, candidate.hour,
+                candidate.minute, candidate.day_period,
+            ))
+        ]
+        if not compatible:
+            return GroundingDecision(None, "time_normalization_mismatch")
+        candidate = max(compatible, key=lambda item: (item.precision, -len(item.display)))
+        return GroundingDecision(candidate.display)
+
+    @staticmethod
+    def _time_components_compatible(
+        left: tuple[int | None, int | None, int | None, int | None, int | None, str | None],
+        right: tuple[int | None, int | None, int | None, int | None, int | None, str | None],
+    ) -> bool:
+        comparable = False
+        for first, second in zip(left[:5], right[:5]):
+            if first is not None and second is not None:
+                comparable = True
+                if first != second:
+                    return False
+        return comparable
+
+    @classmethod
+    def _has_time_conflict(cls, articles: list[Article]) -> bool:
+        return len({candidate.normalized_datetime for candidate in cls._event_time_candidates(articles)}) > 1
+
+    @staticmethod
+    def _location_candidates(articles: list[Article]) -> list[LocationCandidate]:
+        candidates: list[LocationCandidate] = []
+        triggers = r"(?:事发于|发生在|位于|发生地点为|事故地点为|事发地点为|事故地点是|事发地是|地点位于)"
+        pattern = re.compile(
+            triggers + r"\s*(?P<place>[\u4e00-\u9fff]{2,48}?)(?=内的|内|的|出现|发生|，|。|；|$)"
+        )
+        for article in articles:
+            content = ReportService._safe_snippet(article.content)
+            if not content:
+                continue
+            for match in pattern.finditer(content):
+                place = ReportService._normalize_location(match.group("place"))
+                if not place:
+                    continue
+                sentence = ReportService._sentence_for_index(content, match.start(), match.end())
+                components = ReportService._location_components(place)
+                candidates.append(
+                    LocationCandidate(
+                        normalized_name=place,
+                        components=components,
+                        precision=max(len(components), 1),
+                        news_id=article.news_id,
+                        quote=sentence,
+                    )
+                )
+        return ReportService._stable_candidate_unique(candidates, lambda item: (item.normalized_name, item.news_id))
+
+    @staticmethod
+    def _normalize_location(value: str) -> str:
+        return re.sub(r"[\s，。；、]+", "", value).strip("位于在的")
+
+    @staticmethod
+    def _location_components(value: str) -> tuple[str, ...]:
+        suffixes = ("产业园", "园区", "新区", "街道", "电站", "机场", "车站", "医院", "学校", "省", "市", "区", "县", "镇", "村", "路")
+        components = []
+        for suffix in suffixes:
+            for match in re.finditer(rf"[\u4e00-\u9fff]{{1,20}}{suffix}", value):
+                component = match.group(0)
+                if component not in components:
+                    components.append(component)
+        return tuple(components)
+
+    @classmethod
+    def _ground_location(
+        cls,
+        model_value: str | None,
+        articles: list[Article],
+    ) -> GroundingDecision:
+        candidates = cls._location_candidates(articles)
+        if not candidates:
+            return GroundingDecision(None, "location_hierarchy_mismatch")
+        if model_value is None:
+            candidate = max(candidates, key=lambda item: (item.precision, len(item.normalized_name)))
+            return GroundingDecision(candidate.normalized_name)
+        model_name = cls._normalize_location(model_value)
+        compatible = [
+            candidate for candidate in candidates
+            if model_name in candidate.normalized_name or candidate.normalized_name in model_name
+        ]
+        if not compatible:
+            return GroundingDecision(None, "location_hierarchy_mismatch")
+        candidate = max(compatible, key=lambda item: (item.precision, len(item.normalized_name)))
+        return GroundingDecision(candidate.normalized_name)
+
+    @classmethod
+    def _cause_candidates(cls, articles: list[Article]) -> list[CauseCandidate]:
+        candidates: list[CauseCandidate] = []
+        investigation_markers = ("具体原因仍在进一步调查", "具体原因仍在调查", "原因仍在调查", "原因正在调查", "原因尚在调查", "事故原因尚未公布")
+        patterns = (
+            r"初步排查显示(?P<subject>[^，。；]{2,80}?(?:故障|失效))",
+            r"(?P<subject>[\u4e00-\u9fffA-Za-z0-9]+(?:故障|失效))是本次[^。；]{0,30}?初步原因",
+            r"(?:异常|事故)[^。；]{0,16}?与(?P<subject>[^，。；]{2,80}?(?:故障|失效))有关",
+        )
+        for article in articles:
+            content = cls._safe_snippet(article.content)
+            if not content:
+                continue
+            for sentence in re.split(r"(?<=[。！？；])", content):
+                sentence = sentence.strip()
+                if not sentence:
+                    continue
+                if any(marker in sentence for marker in investigation_markers):
+                    candidates.append(CauseCandidate(None, None, "under_investigation", True, ((article.news_id, sentence),)))
+                for pattern in patterns:
+                    match = re.search(pattern, sentence)
+                    if match is None:
+                        continue
+                    subject = match.group("subject").strip("，。； ")
+                    candidates.append(
+                        CauseCandidate(
+                            cause_text=subject,
+                            normalized_subject=cls._normalize_cause_subject(subject),
+                            status="preliminary",
+                            investigation_ongoing=False,
+                            evidence=((article.news_id, sentence),),
+                        )
+                    )
+        return candidates
+
+    @staticmethod
+    def _normalize_cause_subject(value: str) -> str:
+        return re.sub(r"[\s，。；、]", "", value).replace("失效", "故障")
+
+    @classmethod
+    def _ground_cause(
+        cls,
+        model_value: str | None,
+        articles: list[Article],
+    ) -> GroundingDecision:
+        candidates = cls._cause_candidates(articles)
+        preliminary = [candidate for candidate in candidates if candidate.cause_text]
+        investigation = any(candidate.investigation_ongoing for candidate in candidates)
+        if not preliminary and not investigation:
+            return GroundingDecision(None, "cause_slot_not_grounded")
+        model_text = cls._normalize_cause_subject(model_value or "")
+        if model_value and preliminary and not any(
+            candidate.normalized_subject and candidate.normalized_subject in model_text
+            for candidate in preliminary
+        ) and "调查" not in model_text:
+            return GroundingDecision(None, "cause_slot_not_grounded")
+        if preliminary:
+            chosen = preliminary[0]
+            if investigation:
+                return GroundingDecision(f"初步原因指向{chosen.cause_text}，具体原因仍在进一步调查。")
+            return GroundingDecision(f"初步原因指向{chosen.cause_text}。")
+        return GroundingDecision("具体原因仍在进一步调查。")
+
+    @classmethod
+    def _natural_person_values(cls, articles: list[Article]) -> list[str]:
         values = []
         patterns = (
-            r"((?:\d{4}年)?\d{1,2}月\d{1,2}日(?:\s*\d{1,2}(?:时|点)(?:\d{1,2}分)?)?)"
-            r"[^。；，]{0,12}(?:发生|事发)",
-            r"(?:发生于|发生在|事发于)\s*"
-            r"((?:\d{4}年)?\d{1,2}月\d{1,2}日(?:\s*\d{1,2}(?:时|点)(?:\d{1,2}分)?)?)",
+            r"(?:负责人|记者|发言人|驾驶员|组织者)\s*(?P<name>[赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳酆鲍史唐费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于傅皮卞齐康伍余元卜顾孟平黄和穆萧尹姚邵湛汪祁毛禹狄米贝明臧计伏成戴谈宋茅庞熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍虞万支柯昝管卢莫经房裘缪干解应宗丁宣邓郁单杭洪包诸左石崔吉龚程邢裴陆荣翁荀羊於惠甄曲封储靳段富巫乌焦巴弓牧隗山谷车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘钭厉戎祖武符刘景詹束龙叶幸司郜黎蓟薄印宿白怀蒲邰从鄂索咸籍赖卓蔺屠蒙池乔阴鬱胥能苍双闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍却璩桑桂濮牛寿通边扈燕冀郏浦尚农温别庄晏柴瞿阎慕连茹习宦艾鱼容向古易慎戈廖庾终居衡步都耿满匡国文寇广禄阙东欧殳沃利蔚越隆师巩聂晁勾敖融冷訾辛阚那简饶空曾毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓公][\u4e00-\u9fff]{1,3})(?=组织|表示|介绍|称|带领|负责|[，。；])",
+            r"(?P<name>[赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳酆鲍史唐费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于傅皮卞齐康伍余元卜顾孟平黄和穆萧尹姚邵湛汪祁毛禹狄米贝明臧计伏成戴谈宋茅庞熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍虞万支柯昝管卢莫经房裘缪干解应宗丁宣邓郁单杭洪包诸左石崔吉龚程邢裴陆荣翁荀羊於惠甄曲封储靳段富巫乌焦巴弓牧隗山谷车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘钭厉戎祖武符刘景詹束龙叶幸司郜黎蓟薄印宿白怀蒲邰从鄂索咸籍赖卓蔺屠蒙池乔阴鬱胥能苍双闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍却璩桑桂濮牛寿通边扈燕冀郏浦尚农温别庄晏柴瞿阎慕连茹习宦艾鱼容向古易慎戈廖庾终居衡步都耿满匡国文寇广禄阙东欧殳沃利蔚越隆师巩聂晁勾敖融冷訾辛阚那简饶空曾毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓公][\u4e00-\u9fff]{1,3})(?:组织|带领|表示|介绍|称)",
         )
-        for content in contents:
+        for article in articles:
+            content = cls._safe_snippet(article.content)
+            if not content:
+                continue
             for pattern in patterns:
-                values.extend(re.findall(pattern, content))
-        return list(dict.fromkeys(value.strip() for value in values if value.strip()))
+                for match in re.finditer(pattern, content):
+                    name = match.group("name")
+                    if cls._is_natural_person(name) and name not in values:
+                        values.append(name)
+        return values
+
+    @classmethod
+    def _ground_persons(cls, values: list[str], articles: list[Article]) -> list[str]:
+        supported = set(cls._natural_person_values(articles))
+        return cls._stable_unique([value.strip() for value in values if value.strip() in supported])
 
     @staticmethod
-    def _extract_location(contents: list[str]) -> str | None:
-        unique = ReportService._location_values(contents)
-        return unique[0] if len(unique) == 1 else None
+    def _is_natural_person(value: str) -> bool:
+        generic_terms = ("相关部门", "有关部门", "有关方面", "工作人员", "相关人员", "当地部门", "负责人", "值班人员", "救援人员")
+        organization_suffixes = ("公司", "集团", "委员会", "管理局", "救援支队", "救援队", "中心", "专家组", "医院", "学校", "政府", "部门")
+        return (
+            re.fullmatch(r"[赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳酆鲍史唐费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于傅皮卞齐康伍余元卜顾孟平黄和穆萧尹姚邵湛汪祁毛禹狄米贝明臧计伏成戴谈宋茅庞熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍虞万支柯昝管卢莫经房裘缪干解应宗丁宣邓郁单杭洪包诸左石崔吉龚程邢裴陆荣翁荀羊於惠甄曲封储靳段富巫乌焦巴弓牧隗山谷车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘钭厉戎祖武符刘景詹束龙叶幸司郜黎蓟薄印宿白怀蒲邰从鄂索咸籍赖卓蔺屠蒙池乔阴鬱胥能苍双闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍却璩桑桂濮牛寿通边扈燕冀郏浦尚农温别庄晏柴瞿阎慕连茹习宦艾鱼容向古易慎戈廖庾终居衡步都耿满匡国文寇广禄阙东欧殳沃利蔚越隆师巩聂晁勾敖融冷訾辛阚那简饶空曾毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓公][\u4e00-\u9fff]{1,3}", value) is not None
+            and not any(term in value for term in generic_terms)
+            and not value.endswith(organization_suffixes)
+        )
 
     @staticmethod
-    def _location_values(contents: list[str]) -> list[str]:
-        pattern = r"(?:事发于|发生在|位于)\s*([\u4e00-\u9fff]{2,16}(?:省|市|区|县|镇|村|路|街道|机场|车站|学校|医院))"
-        values = []
-        for content in contents:
-            values.extend(re.findall(pattern, content))
-        return list(dict.fromkeys(values))
+    def _sentence_for_index(content: str, start: int, end: int) -> str:
+        left = max(content.rfind(marker, 0, start) for marker in ("。", "！", "？", "；")) + 1
+        right_candidates = [position for marker in ("。", "！", "？", "；") if (position := content.find(marker, end)) >= 0]
+        right = min(right_candidates) + 1 if right_candidates else len(content)
+        return content[left:right].strip()
 
     @staticmethod
-    def _ground_cause(cause: str | None, contents: list[str]) -> str | None:
-        if cause is None:
-            return None
-        normalized = cause.strip()
-        investigation_values = {"仍在调查", "原因仍在调查", "原因正在调查", "原因尚在调查"}
-        if normalized in investigation_values:
-            has_support = any(
-                marker in content
-                for content in contents
-                for marker in (
-                    "原因仍在调查",
-                    "原因正在调查",
-                    "原因尚在调查",
-                    "具体原因仍在调查",
-                )
-            )
-            return "仍在调查" if has_support else None
-        return normalized if any(normalized in content for content in contents) else None
-
-    @staticmethod
-    def _extract_cause(contents: list[str]) -> str | None:
-        if any(
-            marker in content
-            for content in contents
-            for marker in ("原因仍在调查", "原因正在调查", "原因尚在调查", "具体原因仍在调查")
-        ):
-            return "仍在调查"
-        statements = []
-        for content in contents:
-            statements.extend(
-                match.strip()
-                for match in re.findall(r"[^。！？]*(?:原因是|由于|因)[^。！？]*[。！？]?", content)
-                if match.strip()
-            )
-        unique = list(dict.fromkeys(statements))
-        if len(unique) == 1:
-            return unique[0]
-        if len(unique) > 1:
-            return "不同报道对事件原因的说法存在冲突"
-        return None
-
-    @staticmethod
-    def _extract_persons(contents: list[str]) -> list[str]:
-        pattern = r"[\u4e00-\u9fff]{2,12}(?:政府|警方|消防|医院|学校|公司|委员会|部门|救援队)"
-        values = []
-        for content in contents:
-            values.extend(re.findall(pattern, content))
-        return list(dict.fromkeys(values))
+    def _stable_candidate_unique(values: list, key):
+        result = []
+        seen = set()
+        for value in values:
+            value_key = key(value)
+            if value_key not in seen:
+                seen.add(value_key)
+                result.append(value)
+        return result
 
     @staticmethod
     def _has_explicit_conflict(contents: list[str]) -> bool:
@@ -710,35 +1216,7 @@ class ReportService:
 
     @staticmethod
     def _is_specific_person_or_org(value: str) -> bool:
-        generic_terms = (
-            "相关部门",
-            "有关部门",
-            "有关方面",
-            "工作人员",
-            "相关人员",
-            "当地部门",
-        )
-        if any(term in value for term in generic_terms) or value.endswith("负责人"):
-            return False
-
-        organization_suffixes = (
-            "人民政府",
-            "公安局",
-            "应急管理局",
-            "消防救援支队",
-            "消防救援队",
-            "医院",
-            "学校",
-            "公司",
-            "委员会",
-            "协会",
-            "中心",
-            "研究院",
-            "集团",
-        )
-        if len(value) >= 4 and value.endswith(organization_suffixes):
-            return True
-        return re.fullmatch(r"[\u4e00-\u9fff]{2,4}", value) is not None
+        return ReportService._is_natural_person(value)
 
     @staticmethod
     def _stable_unique(values: list[str]) -> list[str]:
@@ -747,6 +1225,40 @@ class ReportService:
             normalized = value.strip()
             if normalized and normalized not in result:
                 result.append(normalized)
+        return result
+
+    @classmethod
+    def _semantic_unique_suggestions(cls, values: list[str]) -> list[str]:
+        """Keep stable, user-visible suggestions without repeated follow-up advice."""
+        result: list[str] = []
+        categories: list[set[str]] = []
+        for value in values:
+            normalized = cls._sanitize_user_text(value).strip()
+            if not normalized:
+                continue
+            compact = re.sub(r"[\s，。；、！!？?]", "", normalized)
+            tags = set()
+            if "持续跟踪" in compact or "调查进展" in compact or "可信来源" in compact:
+                tags.add("follow_up")
+            if "核验" in compact or "口径差异" in compact:
+                tags.add("verification")
+            if "负面情绪" in compact or "高频议题" in compact:
+                tags.add("sentiment")
+            duplicate_index = next(
+                (
+                    index
+                    for index, (existing, existing_tags) in enumerate(zip(result, categories))
+                    if compact == re.sub(r"[\s，。；、！!？?]", "", existing)
+                    or (tags == {"follow_up"} and existing_tags == {"follow_up"})
+                ),
+                None,
+            )
+            if duplicate_index is None:
+                result.append(normalized)
+                categories.append(tags)
+            elif len(normalized) > len(result[duplicate_index]):
+                result[duplicate_index] = normalized
+                categories[duplicate_index] = tags
         return result
 
     @staticmethod

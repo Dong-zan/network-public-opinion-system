@@ -23,6 +23,10 @@ class SourceRegistry:
 
     registry_version = "source-registry-v1"
 
+    @property
+    def is_configured(self) -> bool:
+        return True
+
     def find(self, source_name: str) -> SourceProfile | None:
         raise NotImplementedError
 
@@ -30,6 +34,10 @@ class SourceRegistry:
 class StaticSourceRegistry(SourceRegistry):
     def __init__(self, profiles: tuple[SourceProfile, ...] = ()) -> None:
         self._profiles = tuple(profiles)
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self._profiles)
 
     def find(self, source_name: str) -> SourceProfile | None:
         normalized = source_name.strip()

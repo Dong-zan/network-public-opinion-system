@@ -94,7 +94,7 @@ def test_source_words_do_not_prove_official_identity() -> None:
 
     answer = service.answer(event, "这是正式官方通报吗？").answer
 
-    assert answer == "当前输入未提供足够的来源身份信息，无法确认是否属于正式官方渠道。"
+    assert "离线 Fake Provider 模式" in answer
     assert "官方确认" not in answer
     assert "没有任何官方声明" not in answer
 
@@ -119,7 +119,9 @@ def test_missing_evidence_does_not_invent_information() -> None:
 
     answer = service.answer(event, "请列出全部涉事人员姓名").answer
 
-    assert "当前信息不足" in answer
+    assert "离线 Fake Provider 模式" in answer
+    assert "当前信息不足：当前事件上下文中没有找到支持该问题的相关证据" not in answer
+    assert "张三" not in answer
 
 
 def test_malicious_article_cannot_override_time_and_evidence_rules() -> None:

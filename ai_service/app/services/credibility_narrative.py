@@ -32,12 +32,18 @@ class CredibilityNarrativeBuilder:
     @staticmethod
     def _source_sentence(source: SourceAssessment) -> str:
         if source.status == "verified":
-            return "文章来源名称和链接可与本地登记信息对应。"
+            return "文章提供了明确的来源名称、链接和发布时间等可追溯信息。"
         if source.status == "mismatch":
-            return "文章来源名称与链接域名存在登记不一致，需要谨慎核验。"
+            return "文章来源名称与链接信息存在不一致，需要结合其他材料核验。"
         if source.status == "partially_verified":
-            return "文章提供了部分可追溯元数据，但尚不足以完成来源确认。"
-        return "文章来源暂无法在本地登记信息中验证，这不代表来源存在问题。"
+            return "文章提供了部分来源和发布时间等可追溯信息。"
+        if {
+            "source_present",
+            "url_hostname_present",
+            "publish_time_present",
+        } <= set(source.signals):
+            return "文章提供了明确的来源名称、链接和发布时间。"
+        return "当前文章的来源名称、链接或发布时间信息不完整。"
 
     @staticmethod
     def _language_sentence(language: LanguageAssessment) -> str:

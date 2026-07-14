@@ -38,6 +38,7 @@ class DeepSeekProvider(LLMProvider):
         self.config = config
         self._sleep = sleep
         self._max_retries = max(0, min(max_retries, 2))
+        self.last_response_metadata: dict[str, object] = {}
         self._client = client or OpenAI(
             api_key=config.deepseek_api_key,
             base_url=config.deepseek_base_url,
@@ -55,11 +56,17 @@ class DeepSeekProvider(LLMProvider):
                 if status_code in self._retryable_statuses and attempt < self._max_retries:
                     self._sleep(0.1 * (2**attempt))
                     continue
-                raise self._map_exception(exc, status_code) from exc
+                mapped = self._map_exception(exc, status_code)
+                mapped.provider_status_code = status_code
+                mapped.diagnostic_category = self._diagnostic_category(exc, status_code)
+                raise mapped from exc
 
             content = self._extract_content(response)
+            self.last_response_metadata = self._response_metadata(response)
             if not content:
-                raise LLMProviderError("DeepSeek returned an empty answer")
+                error = LLMProviderError("DeepSeek returned an empty answer")
+                error.diagnostic_category = "provider_empty_response"
+                raise error
             return content
 
         raise LLMProviderUnavailableError("DeepSeek is unavailable")
@@ -109,3 +116,31 @@ class DeepSeekProvider(LLMProvider):
         if status_code in self._retryable_statuses or (status_code is not None and status_code >= 500):
             return LLMProviderUnavailableError("DeepSeek service is unavailable")
         return LLMProviderError("DeepSeek request failed")
+
+    @staticmethod
+    def _diagnostic_category(exc: Exception, status_code: int | None) -> str:
+        if isinstance(exc, (APITimeoutError, TimeoutError)):
+            return "provider_timeout"
+        if isinstance(exc, (APIConnectionError, ConnectionError)):
+            return "provider_connection"
+        if status_code is not None:
+            return "provider_http_status"
+        return "provider_unexpected_error"
+
+    @staticmethod
+    def _response_metadata(response: Any) -> dict[str, object]:
+        try:
+            finish_reason = response.choices[0].finish_reason
+        except (AttributeError, IndexError, TypeError):
+            finish_reason = None
+        usage = getattr(response, "usage", None)
+        token_usage = {
+            key: value
+            for key, value in (
+                ("prompt_tokens", getattr(usage, "prompt_tokens", None)),
+                ("completion_tokens", getattr(usage, "completion_tokens", None)),
+                ("total_tokens", getattr(usage, "total_tokens", None)),
+            )
+            if isinstance(value, int)
+        }
+        return {"finish_reason": finish_reason, "token_usage": token_usage or None}

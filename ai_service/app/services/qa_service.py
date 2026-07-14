@@ -61,24 +61,21 @@ class QAService:
             elif question_type == "multi_evidence":
                 result = self._answer_multi_article(event, question)
             elif question_type == "trend":
-                result = self._answer_trend(event)
+                result = self._answer_via_provider(event, question)
             elif question_type == "source":
-                result = self._answer_sources(event)
+                result = self._answer_sources(event, question)
             elif question_type == "source_identity":
-                result = self._answer_source_identity(event)
+                result = self._answer_source_identity(event, question)
             elif question_type == "article":
                 result = self._answer_article(event, question)
             elif question_type == "risk":
-                result = self._answer_risk(event)
+                result = self._answer_risk(event, question)
             elif question_type == "sentiment":
-                result = self._answer_sentiment(event.analysis.sentiment)
+                result = self._answer_sentiment(event, question)
             elif question_type == "summary":
                 result = self._answer_summary(event, question)
             elif question_type == "out_of_scope":
-                result = QAResult(
-                    answer=f"{INSUFFICIENT}，该问题超出当前事件上下文可回答的范围。",
-                    limitations=["当前事件上下文没有支持该问题的证据"],
-                )
+                result = self._answer_via_provider(event, question)
             else:
                 result = self._answer_from_relevant_articles(event, question)
         return self._finalize_result(result)
@@ -193,17 +190,13 @@ class QAService:
             event.articles[: self.top_k]
         )
         if not title and not summary and not articles:
-            return QAResult(answer=f"{INSUFFICIENT}，无法概述该事件。")
+            return self._answer_via_provider(event, question)
         return self._answer_with_provider(event, question, articles)
 
-    @staticmethod
-    def _answer_risk(event: EventContext) -> QAResult:
+    def _answer_risk(self, event: EventContext, question: str) -> QAResult:
         analysis = event.analysis
         if not analysis.risk_level:
-            return QAResult(
-                answer=f"{INSUFFICIENT}：上游分析未提供风险等级，5号不会自行计算或判断风险等级。",
-                limitations=["缺少上游 risk_level"],
-            )
+            return self._answer_via_provider(event, question)
 
         details = []
         if analysis.heat is not None:
@@ -231,31 +224,21 @@ class QAService:
             limitations=[] if details else ["缺少风险解释所需的其他上游指标"],
         )
 
-    @staticmethod
-    def _answer_sentiment(sentiment: Sentiment | None) -> QAResult:
+    def _answer_sentiment(self, event: EventContext, question: str) -> QAResult:
+        sentiment = event.analysis.sentiment
         if sentiment is None:
-            return QAResult(
-                answer=f"{INSUFFICIENT}：上游分析未提供情感结果，5号不会自行计算情感倾向。",
-                limitations=["缺少上游 sentiment"],
-            )
+            return self._answer_via_provider(event, question)
         values = QAService._sentiment_values(sentiment)
         if not values:
-            return QAResult(
-                answer=f"{INSUFFICIENT}：情感结果中的正面、中性和负面占比均未提供。",
-                limitations=["sentiment 各分项为空"],
-            )
+            return self._answer_via_provider(event, question)
         return QAResult(
             answer=f"上游情感分析结果显示：{values}。5号仅解释该结果，不重新计算情感值。",
             confidence=0.9,
         )
 
-    @staticmethod
-    def _answer_sources(event: EventContext) -> QAResult:
+    def _answer_sources(self, event: EventContext, question: str) -> QAResult:
         if not event.articles:
-            return QAResult(
-                answer=f"{INSUFFICIENT}：当前事件上下文没有提供任何文章或媒体来源。",
-                limitations=["articles 为空"],
-            )
+            return self._answer_via_provider(event, question)
 
         records = []
         seen = set()
@@ -269,18 +252,14 @@ class QAService:
             records.append(f"{source}（{platform}）" if platform else source)
 
         if not records or all(item == "来源未标注" for item in records):
-            return QAResult(
-                answer=f"{INSUFFICIENT}：已提供文章，但没有标注媒体来源或平台。",
-                limitations=["文章 source 和 platform 为空"],
-            )
+            return self._answer_via_provider(event, question)
         return QAResult(
             answer="当前已提供的媒体或平台包括：" + "、".join(records) + "。",
             confidence=0.95,
             evidence_refs=QAService._refs(event.articles),
         )
 
-    @staticmethod
-    def _answer_source_identity(event: EventContext) -> QAResult:
+    def _answer_source_identity(self, event: EventContext, question: str) -> QAResult:
         explicitly_official = [article for article in event.articles if QAService._is_official(article)]
         if explicitly_official:
             sources = []
@@ -293,7 +272,7 @@ class QAService:
                 + "、".join(sources)
                 + "。该表述仅依据输入中明确提供的来源身份信息。",
                 confidence=0.95,
-                evidence_refs=QAService._refs(explicitly_official),
+                evidence_refs=self._refs(explicitly_official),
             )
 
         has_identity_fields = any(
@@ -309,25 +288,15 @@ class QAService:
                 confidence=0.8,
                 limitations=["没有来源被显式标记为官方"],
             )
-        return QAResult(
-            answer="当前输入未提供足够的来源身份信息，无法确认是否属于正式官方渠道。",
-            confidence=0.2,
-            limitations=["缺少 is_official、account_type 或 source_type"],
-        )
+        return self._answer_via_provider(event, question)
 
     def _answer_article(self, event: EventContext, question: str) -> QAResult:
         if not event.articles:
-            return QAResult(
-                answer=f"{INSUFFICIENT}：当前事件上下文没有提供可查询的文章。",
-                limitations=["articles 为空"],
-            )
+            return self._answer_via_provider(event, question)
 
         article = self._resolve_target_article(event.articles, question)
         if article is None:
-            return QAResult(
-                answer=f"{INSUFFICIENT}：未在当前事件文章中找到与问题匹配的报道。",
-                limitations=["没有匹配到 news_id、来源或标题"],
-            )
+            return self._answer_via_provider(event, question)
         description = self._article_description(article)
         source = f"，来源为{article.source}" if article.source else ""
         return QAResult(
@@ -358,20 +327,14 @@ class QAService:
     def _answer_from_relevant_articles(self, event: EventContext, question: str) -> QAResult:
         articles = self.select_relevant_articles(event, question)
         if not articles:
-            return QAResult(
-                answer=f"{INSUFFICIENT}：当前事件上下文中没有找到支持该问题的相关证据。",
-                limitations=["没有匹配到相关文章"],
-            )
+            return self._answer_via_provider(event, question)
 
         return self._answer_with_provider(event, question, articles)
 
     def _answer_multi_article(self, event: EventContext, question: str) -> QAResult:
         articles = self.select_relevant_articles(event, question)
         if not articles:
-            return QAResult(
-                answer=f"{INSUFFICIENT}：当前事件上下文没有可用于综合的文章证据。",
-                limitations=["没有有效文章"],
-            )
+            return self._answer_via_provider(event, question)
         return self._answer_with_provider(event, question, articles)
 
     def _answer_multiple_specified_articles(
@@ -390,14 +353,7 @@ class QAService:
         missing = [news_id for news_id in requested_ids if news_id not in articles_by_id]
 
         if not found:
-            return QAResult(
-                answer=(
-                    f"{INSUFFICIENT}：当前事件数据中未找到指定文章："
-                    + "、".join(f"news_id={news_id}" for news_id in missing)
-                    + "。"
-                ),
-                limitations=["指定的文章编号均未找到"],
-            )
+            return self._answer_via_provider(event, question)
 
         prompt = build_qa_prompt(event, question, found, self.article_max_chars)
         provider_answer = self._generate_safely(prompt)
@@ -454,6 +410,13 @@ class QAService:
             evidence_refs=self._refs(articles),
             limitations=["Fake Provider 仅整理关键词匹配到的证据，不代表真实模型综合分析"],
         )
+
+    def _answer_via_provider(self, event: EventContext, question: str) -> QAResult:
+        articles = self.select_relevant_articles(event, question)
+        if not articles:
+            valid_articles = [article for article in event.articles if self._is_valid_article(article)]
+            articles = self._sort_by_publish_time(valid_articles[: self.top_k])
+        return self._answer_with_provider(event, question, articles)
 
     @staticmethod
     def _resolve_target_article(articles: list[Article], question: str) -> Article | None:

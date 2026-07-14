@@ -8,7 +8,7 @@
 - `POST /ai/ask`：基于 1 号后端传入的 `EventContext` 回答事件概述、风险解释、情感、媒体来源、具体文章和趋势限制等问题。
 - `POST /ai/report`：基于同一 `EventContext` 生成结构化的事件概述、整体总结、趋势解释、风险解释、建议和局限说明。
 - `POST /ai/verify`：在当前事件输入的文章范围内，按原子事实主张执行确定性的多来源证据核验。
-- `POST /ai/evidence-graph`：确定性构建事件、文章、来源和原子主张图谱，并返回证据关系、主张簇、演化时间线及可解释结构指标。
+- `POST /ai/evidence-graph`：优先由 DeepSeek 阅读事件材料和新闻原文，生成主张、证据关系、摘要与关键发现；模型不可用或输出不合法时返回确定性图谱。
 - 智能问答与智能报告是两个独立功能，只共享 EventContext、Provider、配置和统一异常边界。
 - 当前业务规则、问题分类和文章 Top-K 检索能力已经实现。
 - 默认使用稳定、离线的 `FakeLLMProvider`，仅用于测试和离线联调，不访问网络，也不需要 API Key。
@@ -19,7 +19,7 @@
 - 报告接口在 DeepSeek 模式下要求模型返回 JSON，并通过 Pydantic 校验；结构错误最多安全修复一次。
 - 图表不由大模型生成。完整详情页由前端组合结构化图表数据和 AI 报告文字。
 - 第一阶段核验不调用 Provider、不联网，不使用模型自报置信度；`evidence_score` 是启发式证据评分，不代表事实为真的概率。
-- 第一阶段证据图谱不调用 Provider；转载文章保留图节点，但不会增加独立来源数量，结构比例也不表示真实性概率。
+- 证据图谱在 `AI_EVIDENCE_GRAPH_LLM_ENABLED=true` 且使用 DeepSeek Provider 时最多调用模型一次；转载文章保留图节点，但不会增加独立来源数量，结构比例也不表示真实性概率。
 
 ## 当前不包含
 
@@ -86,10 +86,14 @@ AI_REPORT_ARTICLE_MAX_CHARS=1000
 AI_VERIFY_MAX_CANDIDATES=50
 AI_VERIFY_MAX_SENTENCES_PER_ARTICLE=100
 AI_VERIFY_ARTICLE_MAX_CHARS=5000
-AI_EVIDENCE_GRAPH_MAX_ARTICLES=50
+AI_VERIFY_EXPLANATION_ENABLED=true
+AI_VERIFY_EXPLANATION_ARTICLE_MAX_CHARS=6000
+AI_EVIDENCE_GRAPH_LLM_ENABLED=true
+AI_EVIDENCE_GRAPH_MAX_ARTICLES=12
 AI_EVIDENCE_GRAPH_MAX_CLAIMS_PER_ARTICLE=5
-AI_EVIDENCE_GRAPH_MAX_EDGES=500
-AI_EVIDENCE_GRAPH_ARTICLE_MAX_CHARS=5000
+AI_EVIDENCE_GRAPH_ARTICLE_MAX_CHARS=6000
+AI_EVIDENCE_GRAPH_MAX_NODES=40
+AI_EVIDENCE_GRAPH_MAX_EDGES=60
 ```
 
 `.env` 已被 `.gitignore` 排除。源码、测试、日志和 API 响应都不应包含真实密钥。`AI_LLM_PROVIDER` 只接受 `fake` 或 `deepseek`，其他值会明确报错；选择 `deepseek` 但密钥为空也会在初始化时失败，不会回退到 Fake。
@@ -112,22 +116,53 @@ uvicorn app.main:app --host 127.0.0.1 --port 8005 --env-file .env
 
 自动测试全部使用 Fake 或 mock 客户端，不会发出真实 DeepSeek 请求，也不会消耗 API 额度。
 
+## /ai/verify 用户可读证据解释
+
+`AI_VERIFY_EXPLANATION_ENABLED=true` 默认启用，可显式设为 `false` 关闭。启用后，`/ai/verify` 会在确定性核验和可信度评分全部完成后，最多调用一次当前 LLM Provider，将既有结论、逐字证据、来源状态和评分明细转写为 `ai_explanation`。LLM 不参与 `overall_verdict`、`claim_results`、`evidence_score`、`risk_score`、`risk_label` 或 `assessment_confidence` 的计算。开关关闭时 `ai_explanation` 和 `display_result` 均为 `null`；开关开启后，模型成功返回 `status=success`，模型失败则返回 `status=fallback`，不会无原因返回 `null`。
+
+`ai_explanation.score_breakdown` 由代码按照当前 `credibility-risk-v1` 权重生成，包含证据、来源和语言风险的权重及贡献。`evidence_score` 是启发式证据强度，`risk_score` 是确定性综合风险分，二者都不是真实性概率。
+
+模型输出必须通过 claim id、news id、来源和逐字 quote 校验。`evidence_source_assessments` 分别评价每篇实际引用证据的来源角色、注册状态、域名匹配和元数据覆盖；输入标记为政务发布不等于来源身份已经验证，只有本地注册表匹配且域名一致时才能使用 `verified` 表述。
+
+面向前端的 `display_result` 包含 `headline`、`conclusion`、`reasons`、`evidence_cards` 和 `uncertainties`。每张证据卡片只保留同一来源最相关的一条逐字引用，并补充来源身份说明和该引用为何支持、反驳、关联或更新目标主张；原始 `claim_results` 和证据数组继续保留供审计。超时、连接失败、空响应、非法 JSON、Schema 错误、引用错误或未知异常都不会使 `/ai/verify` 失败；接口仍返回 HTTP 200，并提供证据驱动的 `deterministic_fallback` 解释。测试和离线联调可使用 Fake 或 Stub Provider，不访问真实网络。
+
 ## /ai/verify 语义校准（仅离线开发）
 
 `semantic_assessment` 是可选增强结果，默认 `AI_VERIFY_SEMANTIC_ENABLED=false`。它不会参与 `overall_verdict`、`claim_results`、`evidence_score`、可信度 `risk_score`、`risk_label`、`assessment_confidence` 或第一阶段确定性摘要。
 
-仓库内的 `tests/fixtures/verification_semantic_calibration.json` 使用虚构、脱敏文章和预置候选输出。运行 Validator 离线评测：
+仓库内的 `tests/fixtures/verification_semantic_calibration.json` 使用虚构、脱敏文章和预置候选输出。`fixture-validator` 只验证固定候选经过 Schema 和 Validator 后是否符合人工预期，不代表真实模型准确率。运行确定性离线评测：
 
 ```powershell
 python scripts/evaluate_verification_semantic.py --mode fixture-validator
 ```
 
-人工校准真实模型时：
+人工校准真实模型时，必须使用显式授权的本地采集器。没有 `--allow-network` 时脚本会在创建 Provider、读取模型密钥或访问网络前退出。建议每个案例串行重复3次：
 
-1. 确认默认语义开关关闭，只准备脱敏、虚构的测试文章。
-2. 在个人本地环境临时启用语义功能，人工调用模型并仅保存其原始 JSON 输出。
-3. 输出按 `{"outputs":[{"case_id":"...","output":{...}}]}` 保存到 `local_calibration_outputs/`；该目录已被 Git 忽略。
-4. 关闭语义功能，使用以下命令离线计算指标：
+```powershell
+python scripts/collect_verification_semantic_outputs.py `
+  --allow-network `
+  --env-file .env `
+  --repeat 3 `
+  --delay-seconds 1 `
+  --output-dir local_calibration_outputs/deepseek-v4-flash-run
+```
+
+`--env-file` 是可选的显式路径：只有同时提供 `--allow-network` 时才会读取；未提供时只使用当前进程已有环境变量，不会自动寻找 `.env`。环境文件必须在创建 `Settings` 和 Provider 前加载，路径、内容和密钥不会写入采集结果。`--model-label` 仅作为实验 `run_label`，不会覆盖配置中的真实模型名称。
+
+采集器只读取上述虚构 fixture，复用生产语义链路的 Prompt builder、`SemanticLLMOutput` Schema 和 `SemanticCredibilityValidator`。它不会读取数据库、注册 FastAPI 路由或执行 repair。每个 bundle 会记录 fixture 原始字节 SHA-256、fixture/Prompt/Validator/采集 Schema 版本、Provider、真实模型、文章截断长度、生成参数、创建时间及可安全取得的 Git commit。中断后可在同一命令中增加 `--resume`，已存在的 `(case_id, run_id)` 不会再次调用模型。
+
+`--resume` 只允许继续同一实验。fixture 内容或版本、Prompt/Validator 版本、Provider、真实模型、文章长度限制、thinking、temperature、max tokens 或采集 Schema 不一致时会拒绝合并，并要求使用新的 `output-dir`。未知 `--case-id` 会在调用 Provider 前报错；损坏或不兼容的已有 bundle 不会被覆盖。
+
+原始输出只保存在已被 Git 忽略的 `local_calibration_outputs/`。不得提交该目录、真实 `.env`、API Key、真实用户新闻、Authorization、完整 Prompt 或真实模型输出。采集完成后关闭语义功能，并进行重复运行离线评测：
+
+```powershell
+python scripts/evaluate_verification_semantic.py `
+  --mode repeated-saved-output `
+  --repeated-output local_calibration_outputs/deepseek-v4-flash-run/semantic-runs.json `
+  --report local_calibration_outputs/deepseek-v4-flash-run/evaluation-report.json
+```
+
+A.2 的单次 saved-output 格式仍可使用：
 
 ```powershell
 python scripts/evaluate_verification_semantic.py `
@@ -136,9 +171,9 @@ python scripts/evaluate_verification_semantic.py `
   --report local_calibration_outputs/evaluation-report.json
 ```
 
-评测脚本不会创建 Provider 或访问网络。不得提交真实 `.env`、API Key、真实用户新闻、完整敏感 Prompt 或真实模型输出。
+评测脚本不会创建 Provider 或访问网络。重复采集评测的 JSON 会保留 fixture SHA、Prompt/Validator 版本、Provider、真实模型、run label、文章长度限制和生成参数，便于确认实验身份。准确率指标基于 Validator 接受后的风险集合；fallback 和 success rate 反映模型格式与可用性；exact agreement 与 Jaccard 反映同案例重复运行的一致性；角色一致性比较 `(claim_id, publisher_role, attributed_role)` 集合；p50/p95 等延迟指标包含成功和安全失败的采集运行。未经 Validator 接受的原始候选不会进入稳定性结果。
 
-进入第二阶段 B 前，建议人工校准达到：复杂风险总体 precision 不低于 0.85；`preliminary_as_confirmed` 和 `title_body_mismatch` precision 不低于 0.90；`unsupported_causality` precision 不低于 0.80；中性案例误报率不高于 0.10；Schema/fallback 比例处于可接受范围。fixture-validator 的确定性准入要求 precision 为 1.0，且伪造 quote、错误 evidence news_id 和不存在 claim id 均不得通过。这些阈值只用于开发验收，不会自动改变业务评分。
+进入第二阶段 B 前，建议人工校准达到：总体 precision 不低于0.85；`preliminary_as_confirmed` 和 `title_body_mismatch` precision 不低于0.90；`unsupported_causality` precision 不低于0.80；中性案例误报率不高于0.10；success rate 不低于0.90；Schema failure rate 不高于0.05；fallback rate 不高于0.10；平均 flag-set Jaccard 不低于0.80；不存在伪造 quote、错误 evidence news_id 或不存在 claim id 通过；启用与关闭语义功能时第一阶段字段完全一致。这些是启发式工程验收门槛，不代表统计学认证，也不会自动改变业务评分。
 
 ## 多来源事实核验边界
 
@@ -156,11 +191,13 @@ python scripts/evaluate_verification_semantic.py `
 
 ## 可解释证据图谱边界
 
-`/ai/evidence-graph` 直接复用原子主张提取、立场分类、引用校验、来源聚类和转载识别能力，不通过 HTTP 调用 `/ai/verify`。图谱包含事件、文章、来源和主张节点，以及归属、发布、断言、支持、反驳、更新和转载关系。所有关系引用必须逐字存在于输入文章正文。
+`/ai/evidence-graph` 不通过 HTTP 调用 `/ai/verify`。启用 LLM 后，DeepSeek 直接阅读输入事件与新闻原文，主要生成文章、主张、证据和来源说明，以及 `supports`、`contradicts`、`same_fact`、`adds_detail`、`updates` 等语义关系。正常模型结果中的 `summary`、节点 `description`、边 `explanation` 和 `key_findings` 来自模型对当前输入材料的分析，不使用固定说明模板。
 
-主张簇优先使用 `claim_type`、规范化槽位、极性和确定性构建，参考时间单独用于演化排序。时间线依次优先使用主张参考时间、事件发生时间和文章发布时间；使用发布时间时会明确标记为 `publish_time`，不会伪装成事件发生时间。
+模型结果必须先通过严格 JSON Schema 和基础 Validator：节点、边 ID 唯一，边端点必须存在，`news_id` 必须属于输入事件，所有非空引文必须逐字存在于对应文章标题或正文。`quotes`、`reposts` 只有在 `quoted_news_ids` 或 `reference_urls` 明确支持时才会保留，不能由发布时间顺序推断。模型生成的节点和边经过稳定去重、ID 规范化、数量限制和稳定排序，同一输入与同一模型输出会得到相同结构。
 
-默认最多处理50篇文章、每篇5条主张、500条语义关系边和每篇5000字符。`AI_EVIDENCE_GRAPH_MAX_EDGES` 只限制 `supports`、`contradicts`、`updates` 的返回数量；`contains`、`published_by`、`asserts`、`duplicates` 等基础结构边始终完整返回。超过 `AI_EVIDENCE_GRAPH_MAX_ARTICLES`、`AI_EVIDENCE_GRAPH_MAX_CLAIMS_PER_ARTICLE`、`AI_EVIDENCE_GRAPH_MAX_EDGES` 或 `AI_EVIDENCE_GRAPH_ARTICLE_MAX_CHARS` 时会确定性截断并写入 `limitations`。冲突比例、转载比例和未解决主张比例只描述当前输入形成的图结构，不是真实性概率。
+事件、文章和来源骨架仍由输入确定性规范化；引用合法性、来源聚类和转载去重继续使用现有能力。时间线依次优先使用主张参考时间、事件发生时间和文章发布时间；使用发布时间时明确标记为 `publish_time`，不会伪装成事件发生时间。模型调用超时、连接失败、返回空内容、非法 JSON、Schema 校验失败或最终没有有效语义关系时，`analysis_method` 返回 `deterministic_fallback`、`fallback_used` 返回 `true`，接口仍返回 HTTP 200；模型成功时分别返回 `llm` 和 `false`。
+
+默认最多向模型提供12篇文章、每篇6000字符，最终最多返回40个节点和60条边。超过限制时会确定性截断并写入 `limitations`。`confidence` 只作为单条模型关系的辅助信息；冲突比例、转载比例和未解决主张比例只描述当前输入形成的图结构，均不是真实性概率。Fake Provider 不模拟图谱语义生成，自动使用确定性 fallback，方便离线测试和联调。
 
 ## 报告与图表边界
 

@@ -10,7 +10,7 @@ from app.schemas.verification import (
 
 @dataclass(frozen=True)
 class CredibilityRiskScoringConfig:
-    version: str = "credibility-risk-v1"
+    version: str = "credibility-risk-v1.1"
     evidence_weight: float = 0.60
     source_weight: float = 0.25
     language_weight: float = 0.15

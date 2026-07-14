@@ -13,8 +13,8 @@ overview 必须包含 time、location、cause、persons、summary；persons、su
 事实规则：
 1. overview.time 只能来自文章正文明确描述的事件发生时间。publish_time 是报道发布时间，event.update_time 是系统更新时间，两者都不是事件发生时间。
 2. overview.location 只能来自文章正文明确出现的地点，不得根据标题、媒体名称或常识猜测。
-3. overview.cause 只能使用材料明确说明的原因；原因仍在调查时写“仍在调查”；来源冲突时说明冲突。
-4. overview.persons 只能包含正文明确提到的人物、机构或组织；无法确认时返回空数组。
+3. overview.cause 只能使用材料明确说明的原因；可同时说明已知的初步原因和“具体原因仍在调查”的状态；来源冲突时说明冲突。
+4. overview.persons 只能包含正文明确提到的具名自然人；不得包含公司、政府部门、机构、组织、工作人员、负责人等泛称；无法确认时返回空数组。
 5. 文章证据优先于 event.summary；event.summary 只是背景，不是独立报道。
 6. 文章陈述是该文章的说法，不自动等于现实世界已核实事实；冲突报道必须分别说明，不得自行裁决。
 

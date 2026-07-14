@@ -45,7 +45,6 @@ def test_provider_exception_returns_safe_503(client, event_payload, failing_prov
         ("为什么风险高？", "上游分析"),
         ("当前舆论情绪如何？", "负面50.0%"),
         ("有哪些媒体报道？", "人民网"),
-        ("是在升温还是降温？", "缺少连续时间序列"),
     ],
 )
 def test_deterministic_questions_work_when_provider_fails(
@@ -59,6 +58,20 @@ def test_deterministic_questions_work_when_provider_fails(
 
     assert response.status_code == 200
     assert expected in response.json()["answer"]
+
+
+def test_missing_trend_data_surfaces_provider_unavailability(
+    client,
+    event_payload,
+    failing_provider_override,
+) -> None:
+    response = client.post(
+        "/ai/ask",
+        json={"event": event_payload, "question": "是在升温还是降温？"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "AI 问答服务暂时不可用"}
 
 
 def test_empty_provider_response_is_rejected(event_payload) -> None:

@@ -1,5 +1,19 @@
+from app.llm.base import LLMProvider
+from app.llm.prompt_types import PromptBundle
 from app.schemas.event import EventContext
 from app.services.qa_service import QAService
+
+
+class RecordingProvider(LLMProvider):
+    name = "deepseek-test"
+
+    def __init__(self, answer: str = "这是模型返回的回答。") -> None:
+        self.answer = answer
+        self.prompts: list[PromptBundle] = []
+
+    def generate(self, prompt: PromptBundle) -> str:
+        self.prompts.append(prompt)
+        return self.answer
 
 
 def ask(client, event: dict, question: str):
@@ -28,7 +42,8 @@ def test_empty_articles_no_fake_sources(client, event_payload) -> None:
 
     assert response.status_code == 200
     answer = response.json()["answer"]
-    assert "当前信息不足" in answer
+    assert "离线 Fake Provider 模式" in answer
+    assert "当前信息不足：当前事件上下文中没有找到支持该问题的相关证据" not in answer
     assert "人民网" not in answer
 
 
@@ -42,12 +57,12 @@ def test_risk_explanation_uses_upstream_result(client, event_payload) -> None:
     assert "风险等级为“高”" in answer
 
 
-def test_trend_insufficient_without_time_series(client, event_payload) -> None:
+def test_trend_without_time_series_uses_provider(client, event_payload) -> None:
     response = ask(client, event_payload, "是在升温还是降温？")
 
     answer = response.json()["answer"]
-    assert "缺少连续时间序列" in answer
-    assert "无法判断" in answer
+    assert "离线 Fake Provider 模式" in answer
+    assert "缺少连续时间序列，因此无法判断" not in answer
 
 
 def test_source_answer_from_articles(client, event_payload) -> None:
@@ -149,7 +164,56 @@ def test_partial_analysis_does_not_crash(client, event_payload) -> None:
     response = ask(client, event_payload, "为什么风险高？")
 
     assert response.status_code == 200
-    assert "当前信息不足" in response.json()["answer"]
+    assert "离线 Fake Provider 模式" in response.json()["answer"]
+
+
+def test_greeting_with_empty_event_returns_provider_answer() -> None:
+    provider = RecordingProvider("你好，我可以直接回答你的问题。")
+    service = QAService(provider=provider)
+    event = EventContext.model_validate({"event_id": 1, "analysis": {}})
+
+    result = service.answer(event, "你好")
+
+    assert result.answer == "你好，我可以直接回答你的问题。"
+    assert len(provider.prompts) == 1
+    assert "你好" in provider.prompts[0].user_prompt
+    assert "当前信息不足" not in result.answer
+
+
+def test_missing_risk_level_returns_provider_answer(event_payload) -> None:
+    event_payload["analysis"].pop("risk_level")
+    provider = RecordingProvider("现有材料可用于讨论风险，但没有上游风险等级。")
+    service = QAService(provider=provider)
+    event = EventContext.model_validate(event_payload)
+
+    result = service.answer(event, "请分析这个事件的风险")
+
+    assert result.answer == "现有材料可用于讨论风险，但没有上游风险等级。"
+    assert len(provider.prompts) == 1
+    assert "请分析这个事件的风险" in provider.prompts[0].user_prompt
+    assert "某地发生事故并开展救援" in provider.prompts[0].user_prompt
+
+
+def test_unrelated_question_returns_provider_answer(event_payload) -> None:
+    provider = RecordingProvider("你好，这是模型对该问题的直接回应。")
+    service = QAService(provider=provider)
+    event = EventContext.model_validate(event_payload)
+
+    result = service.answer(event, "你好")
+
+    assert result.answer == "你好，这是模型对该问题的直接回应。"
+    assert len(provider.prompts) == 1
+
+
+def test_complete_risk_data_keeps_deterministic_answer(event_payload) -> None:
+    provider = RecordingProvider("不应被调用")
+    service = QAService(provider=provider)
+    event = EventContext.model_validate(event_payload)
+
+    result = service.answer(event, "为什么风险高？")
+
+    assert "上游分析结果显示当前风险等级为“高”" in result.answer
+    assert provider.prompts == []
 
 
 def test_empty_summary_falls_back_to_articles(client, event_payload) -> None:

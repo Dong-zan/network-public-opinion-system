@@ -66,8 +66,16 @@ class Settings:
     verify_semantic_max_flags: int = field(
         default_factory=lambda: _positive_int("AI_VERIFY_SEMANTIC_MAX_FLAGS", 12)
     )
+    verify_explanation_enabled: bool = field(
+        default_factory=lambda: _boolean("AI_VERIFY_EXPLANATION_ENABLED", True)
+    )
+    verify_explanation_article_max_chars: int = field(
+        default_factory=lambda: _positive_int(
+            "AI_VERIFY_EXPLANATION_ARTICLE_MAX_CHARS", 6000
+        )
+    )
     evidence_graph_max_articles: int = field(
-        default_factory=lambda: _positive_int("AI_EVIDENCE_GRAPH_MAX_ARTICLES", 50)
+        default_factory=lambda: _positive_int("AI_EVIDENCE_GRAPH_MAX_ARTICLES", 12)
     )
     evidence_graph_max_claims_per_article: int = field(
         default_factory=lambda: _positive_int(
@@ -75,12 +83,18 @@ class Settings:
         )
     )
     evidence_graph_max_edges: int = field(
-        default_factory=lambda: _positive_int("AI_EVIDENCE_GRAPH_MAX_EDGES", 500)
+        default_factory=lambda: _positive_int("AI_EVIDENCE_GRAPH_MAX_EDGES", 60)
     )
     evidence_graph_article_max_chars: int = field(
         default_factory=lambda: _positive_int(
-            "AI_EVIDENCE_GRAPH_ARTICLE_MAX_CHARS", 5000
+            "AI_EVIDENCE_GRAPH_ARTICLE_MAX_CHARS", 6000
         )
+    )
+    evidence_graph_llm_enabled: bool = field(
+        default_factory=lambda: _boolean("AI_EVIDENCE_GRAPH_LLM_ENABLED", True)
+    )
+    evidence_graph_max_nodes: int = field(
+        default_factory=lambda: _positive_int("AI_EVIDENCE_GRAPH_MAX_NODES", 40)
     )
     llm_provider: str = field(default_factory=lambda: os.getenv("AI_LLM_PROVIDER", "fake"))
     deepseek_api_key: str = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY", ""))

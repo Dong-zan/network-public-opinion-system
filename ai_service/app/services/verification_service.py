@@ -15,8 +15,11 @@ from app.services.credibility_assessment_service import (
 )
 from app.services.evidence_retriever import EvidenceRetriever
 from app.services.evidence_validator import EvidenceValidator
+from app.services.evidence_source_assessment import EvidenceSourceAssessmentService
 from app.services.verification_scorer import VerificationScorer
 from app.services.source_clusterer import SourceClusterer, SourceDescriptor
+from app.services.verification_display import VerificationDisplayBuilder
+from app.services.verification_explanation import VerificationExplanationService
 
 
 class TargetArticleNotFoundError(ValueError):
@@ -31,6 +34,9 @@ class VerificationService:
         validator: EvidenceValidator | None = None,
         scorer: VerificationScorer | None = None,
         credibility_assessment_service: CredibilityAssessmentService | None = None,
+        explanation_service: VerificationExplanationService | None = None,
+        evidence_source_assessment_service: EvidenceSourceAssessmentService | None = None,
+        display_builder: VerificationDisplayBuilder | None = None,
         *,
         max_candidates: int = 50,
         max_sentences_per_article: int = 100,
@@ -50,6 +56,14 @@ class VerificationService:
         self.credibility_assessment_service = (
             credibility_assessment_service or CredibilityAssessmentService()
         )
+        self.explanation_service = explanation_service
+        self.evidence_source_assessment_service = (
+            evidence_source_assessment_service
+            or EvidenceSourceAssessmentService(
+                self.credibility_assessment_service.source_evaluator
+            )
+        )
+        self.display_builder = display_builder or VerificationDisplayBuilder()
 
     def verify(
         self,
@@ -155,7 +169,28 @@ class VerificationService:
             ),
             event.articles,
         )
-        return response.model_copy(update={"credibility_assessment": assessment})
+        evidence_source_assessments = self.evidence_source_assessment_service.assess(
+            event,
+            response,
+        )
+        completed_response = response.model_copy(
+            update={
+                "credibility_assessment": assessment,
+                "evidence_source_assessments": evidence_source_assessments,
+            }
+        )
+        if self.explanation_service is None:
+            return completed_response
+        explanation = self.explanation_service.explain(
+            event,
+            target,
+            completed_response,
+        )
+        explained_response = completed_response.model_copy(
+            update={"ai_explanation": explanation}
+        )
+        display_result = self.display_builder.build(event, explained_response)
+        return explained_response.model_copy(update={"display_result": display_result})
 
     def _verify_claim(
         self,
@@ -454,19 +489,31 @@ class VerificationService:
 @lru_cache
 def get_verification_service() -> VerificationService:
     assessment_service = CredibilityAssessmentService()
-    if settings.verify_semantic_enabled:
+    explanation_service = None
+    provider = None
+    if settings.verify_semantic_enabled or settings.verify_explanation_enabled:
         from app.llm.factory import create_llm_provider
+
+        provider = create_llm_provider(settings.llm_provider, config=settings)
+    if settings.verify_semantic_enabled:
         from app.services.semantic_credibility import LlmSemanticCredibilityAnalyzer
 
         assessment_service = CredibilityAssessmentService(
             semantic_analyzer=LlmSemanticCredibilityAnalyzer(
-                create_llm_provider(settings.llm_provider, config=settings),
+                provider,
                 article_max_chars=settings.verify_semantic_article_max_chars,
                 max_flags=settings.verify_semantic_max_flags,
             )
         )
+    if settings.verify_explanation_enabled:
+        explanation_service = VerificationExplanationService(
+            provider,
+            article_max_chars=settings.verify_explanation_article_max_chars,
+            score_config=assessment_service.scorer.config,
+        )
     return VerificationService(
         credibility_assessment_service=assessment_service,
+        explanation_service=explanation_service,
         max_candidates=settings.verify_max_candidates,
         max_sentences_per_article=settings.verify_max_sentences_per_article,
         article_max_chars=settings.verify_article_max_chars,

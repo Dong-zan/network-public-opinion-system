@@ -503,6 +503,34 @@ def test_prompt_evidence_preserves_support_and_context_relations() -> None:
     assert [(item["news_id"], item["relation"]) for item in evidence] == [(2, "supports"), (3, "related")]
 
 
+def test_semantic_prompt_payload_omits_source_authentication_state() -> None:
+    target = Article.model_validate(article(1, "事故造成3人受伤。", "来源甲"))
+    verification = VerificationResponse(
+        target_news_id=1,
+        overall_verdict="insufficient_evidence",
+        evidence_score=20,
+        score_explanation="测试说明。",
+    )
+    context = SemanticAnalysisContext(
+        target,
+        verification,
+        "partially_verified",
+        False,
+        None,
+        ("source_present", "registered_domain_mismatch"),
+        (),
+        5000,
+        (target,),
+    )
+
+    payload = context.to_prompt_payload()
+
+    assert "source_status" not in payload["metadata"]
+    assert "registered_source" not in payload["metadata"]
+    assert "domain_match" not in payload["metadata"]
+    assert payload["metadata"]["metadata_signals"] == ["source_present"]
+
+
 def test_overlapping_flags_keep_one_stable_highest_severity_candidate() -> None:
     target = Article.model_validate(article(1, "事故原因已经最终确定为设备故障。", "来源甲"))
     verification = VerificationResponse(target_news_id=1, overall_verdict="insufficient_evidence", evidence_score=0, score_explanation="测试说明。")
