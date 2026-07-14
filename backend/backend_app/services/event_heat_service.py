@@ -10,6 +10,7 @@ from backend_app.models.analysis import Analysis
 from backend_app.models.article import Article
 from backend_app.models.event import Event
 from backend_app.models.event_heat_history import EventHeatHistory
+from backend_app.services.event_lifecycle_service import EventLifecycleService
 
 
 class EventHeatService:
@@ -92,4 +93,5 @@ class EventHeatService:
         )
         self.db.commit()
         self.db.refresh(event)
+        EventLifecycleService(self.db).update_stage(event_id)
         return event_heat
