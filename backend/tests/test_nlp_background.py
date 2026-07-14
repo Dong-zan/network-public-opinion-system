@@ -17,6 +17,7 @@ from backend_app.internal.articles import (
 from backend_app.models.analysis import Analysis
 from backend_app.models.article import Article
 from backend_app.models.event import Event
+from backend_app.models.event_heat_history import EventHeatHistory
 from backend_app.schemas.article import ArticleCreate
 from backend_app.services.nlp_client import NLPClient, NLPClientError
 
@@ -106,7 +107,12 @@ class NLPBackgroundTaskTests(unittest.TestCase):
         )
         Base.metadata.create_all(
             cls.engine,
-            tables=[Event.__table__, Article.__table__, Analysis.__table__],
+            tables=[
+                Event.__table__,
+                Article.__table__,
+                Analysis.__table__,
+                EventHeatHistory.__table__,
+            ],
         )
         cls.Session = sessionmaker(bind=cls.engine)
 
@@ -116,6 +122,7 @@ class NLPBackgroundTaskTests(unittest.TestCase):
 
     def setUp(self):
         db = self.Session()
+        db.query(EventHeatHistory).delete()
         db.query(Analysis).delete()
         db.query(Article).delete()
         db.query(Event).delete()

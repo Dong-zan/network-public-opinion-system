@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from backend_app.models.analysis import Analysis
 from backend_app.models.article import Article
 from backend_app.models.event import Event
+from backend_app.models.event_heat_history import EventHeatHistory
 
 
 class EventHeatService:
@@ -79,8 +80,16 @@ class EventHeatService:
             return 0.0
 
         event_heat = self.calculate_event_heat(event_id)
+        now = datetime.now()
         event.heat = event_heat
-        event.update_time = datetime.now()
+        event.update_time = now
+        self.db.add(
+            EventHeatHistory(
+                event_id=event_id,
+                heat=event_heat,
+                created_at=now,
+            )
+        )
         self.db.commit()
         self.db.refresh(event)
         return event_heat
