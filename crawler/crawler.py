@@ -324,6 +324,14 @@ def _fetch_weibo_posts(source: dict) -> List[dict]:
             # 按正文长度排序，优先取内容较丰富的帖子
             sorted_posts = sorted(results[0], key=lambda p: len(p.text or ""), reverse=True)
             for post in sorted_posts[:posts_per]:
+                # 长文本展开：搜索API对 >140字 的帖子返回截断文本（末尾"全文"），
+                # 需通过 get_post_by_bid 获取完整内容。
+                if post.is_long_text:
+                    try:
+                        full_post = client.get_post_by_bid(post.bid)
+                        post.text = full_post.text
+                    except Exception as e:
+                        logger.warning(f"    展开长帖失败 {post.bid}: {e}")
                 text = post.text.strip()
                 title = text.split("\n")[0][:80]
 
