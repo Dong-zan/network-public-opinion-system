@@ -11,7 +11,6 @@ from backend_app.models.article import Article
 from backend_app.models.analysis import Analysis
 from backend_app.models.ai_result import AIResult
 
-
 from backend_app.services.statistic_service import StatisticService
 
 
@@ -211,6 +210,14 @@ def get_event_detail(
 
 
 
+    # 发展趋势（按文章发布时间统计报道量）
+
+    trend_data=statistic.trend(
+        event_id
+    )
+
+
+
     #关键词
 
     keywords=[]
@@ -328,12 +335,17 @@ def get_event_detail(
 
 
             "trend":
-            [],
+            trend_data["trend"],
 
 
 
             "trend_labels":
-            [],
+            trend_data["trend_labels"],
+
+
+
+            "trend_highlights":
+            trend_data["trend_highlights"],
 
 
 

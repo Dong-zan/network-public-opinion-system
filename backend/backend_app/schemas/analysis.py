@@ -1,39 +1,61 @@
 from pydantic import BaseModel
 
-from typing import List,Optional
+from typing import List, Optional
 
 
 
 class Sentiment(BaseModel):
 
-    positive:float=0
+    positive: float = 0
 
-    neutral:float=0
+    neutral: float = 0
 
-    negative:float=0
-
+    negative: float = 0
 
 
 
 class AnalysisCreate(BaseModel):
 
-
-    news_id:int
-
-
-    keywords:List[str]=[]
+    # 新闻编号
+    news_id: int
 
 
-    sentiment:Optional[Sentiment]=None
+    # 4号新增输出
+
+    summary: str = ""
 
 
-    heat_score:float=0
+    processed_text: str = ""
 
 
-    stage:Optional[str]=None
+    source: str = ""
 
 
-    risk_level:Optional[str]=None
+    publish_time: Optional[str] = None
 
 
-    similar_news:List[int]=[]
+    url: str = ""
+
+
+    missing_fields: List[str] = []
+
+
+
+    # 原有分析字段
+
+    keywords: List[str] = []
+
+
+    sentiment: Optional[Sentiment] = None
+
+
+    heat_score: float = 0
+
+
+    stage: Optional[str] = None
+
+
+    risk_level: Optional[str] = None
+
+
+    similar_news: List[int] = []

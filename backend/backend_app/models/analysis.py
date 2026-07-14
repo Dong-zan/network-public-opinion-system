@@ -4,7 +4,8 @@ from sqlalchemy import (
     Float,
     String,
     JSON,
-    DateTime
+    DateTime,
+    Text
 )
 
 from datetime import datetime
@@ -12,70 +13,103 @@ from datetime import datetime
 from backend_app.database import Base
 
 
-
 class Analysis(Base):
 
-    __tablename__="analysis"
+    __tablename__ = "analysis"
 
 
-    id=Column(
+    id = Column(
         BigInteger,
         primary_key=True,
         autoincrement=True
     )
 
 
-    news_id=Column(
+    news_id = Column(
         BigInteger
     )
 
 
-    event_id=Column(
+    event_id = Column(
         BigInteger
     )
 
 
-    keywords=Column(
+    # ===== 4号新增输出 =====
+
+    summary = Column(
+        Text
+    )
+
+
+    processed_text = Column(
+        Text
+    )
+
+
+    source = Column(
+        String(100)
+    )
+
+
+    publish_time = Column(
+        String(50)
+    )
+
+
+    url = Column(
+        String(500)
+    )
+
+
+    missing_fields = Column(
         JSON
     )
 
 
-    positive=Column(
-        Float
-    )
+    # ===== 原有分析结果 =====
 
-
-    neutral=Column(
-        Float
-    )
-
-
-    negative=Column(
-        Float
-    )
-
-
-    heat_score=Column(
-        Float
-    )
-
-
-    stage=Column(
-        String(20)
-    )
-
-
-    risk_level=Column(
-        String(20)
-    )
-
-
-    similar_news=Column(
+    keywords = Column(
         JSON
     )
 
 
-    created_at=Column(
+    positive = Column(
+        Float
+    )
+
+
+    neutral = Column(
+        Float
+    )
+
+
+    negative = Column(
+        Float
+    )
+
+
+    heat_score = Column(
+        Float
+    )
+
+
+    stage = Column(
+        String(20)
+    )
+
+
+    risk_level = Column(
+        String(20)
+    )
+
+
+    similar_news = Column(
+        JSON
+    )
+
+
+    created_at = Column(
         DateTime,
         default=datetime.utcnow
     )

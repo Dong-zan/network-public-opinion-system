@@ -15,6 +15,8 @@ class Settings(BaseSettings):
 
     AI_SERVER_URL:str
 
+    NLP_SERVER_URL:str = ""
+
     APP_NAME:str
 
 
