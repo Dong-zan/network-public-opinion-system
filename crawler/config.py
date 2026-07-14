@@ -121,7 +121,7 @@ REQUEST_DELAY = 1.0
 OUTPUT_DIR = "output"
 
 # 后端接收地址（None 表示不推送，仅存本地文件）
-BACKEND_URL = "http://10.122.240.155:8000/internal/articles"
+BACKEND_URL = "http://127.0.0.1:8000/internal/articles"
 
 # ============================================================
 # 去重配置
