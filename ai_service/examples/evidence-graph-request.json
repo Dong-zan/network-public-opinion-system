@@ -1,0 +1,38 @@
+{
+  "event": {
+    "event_id": 101,
+    "title": "示例事故事件",
+    "summary": "用于演示事件内证据图谱。",
+    "update_time": "2026-07-08 12:00:00",
+    "articles": [
+      {
+        "news_id": 1001,
+        "title": "伤亡情况初报",
+        "content": "截至10时，事故造成3人受伤。",
+        "source": "示例媒体甲",
+        "url": "https://example.com/news/1001",
+        "publish_time": "2026-07-08 10:05:00",
+        "platform": "新闻网站"
+      },
+      {
+        "news_id": 1002,
+        "title": "另一来源伤亡信息",
+        "content": "截至10时，另一报道提到事故造成3人受伤。",
+        "source": "示例媒体乙",
+        "url": "https://example.com/news/1002",
+        "publish_time": "2026-07-08 10:10:00",
+        "platform": "新闻网站"
+      },
+      {
+        "news_id": 1003,
+        "title": "不同伤亡说法",
+        "content": "截至10时，有报道提到事故造成5人受伤。",
+        "source": "示例媒体丙",
+        "url": "https://example.com/news/1003",
+        "publish_time": "2026-07-08 10:15:00",
+        "platform": "新闻网站"
+      }
+    ],
+    "analysis": {"keywords": [], "history": []}
+  }
+}
