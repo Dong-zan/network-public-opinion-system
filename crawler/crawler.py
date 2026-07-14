@@ -333,7 +333,18 @@ def _fetch_weibo_posts(source: dict) -> List[dict]:
                     except Exception as e:
                         logger.warning(f"    展开长帖失败 {post.bid}: {e}")
                 text = post.text.strip()
-                title = text.split("\n")[0][:80]
+                # 微博无标题，取正文第一行作为标题，尽量截断到完整句子末尾
+                first_line = text.split("\n")[0]
+                if len(first_line) <= 80:
+                    title = first_line
+                else:
+                    segment = first_line[:80]
+                    cut = -1
+                    for p in ("。", "！", "？", "…", "~"):
+                        p_idx = segment.rfind(p)
+                        if p_idx > cut:
+                            cut = p_idx
+                    title = segment[:cut + 1] if cut > 20 else segment
 
                 raw_time = str(post.created_at) if post.created_at else ""
                 if "+" in raw_time:
