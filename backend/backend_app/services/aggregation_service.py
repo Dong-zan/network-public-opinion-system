@@ -12,6 +12,7 @@ from backend_app.models.analysis import Analysis
 from backend_app.models.article import Article
 from backend_app.models.event import Event
 from backend_app.services.embedding_utils import merge_embedding_center
+from backend_app.services.event_heat_service import EventHeatService
 
 
 EVENT_SIMILARITY_THRESHOLD = 0.75
@@ -73,6 +74,8 @@ class AggregationService:
         analysis.event_id = event.event_id
         self.db.commit()
 
+        EventHeatService(self.db).update_event_heat(event.event_id)
+
         print("文章绑定event完成")
         print("article.news_id:", article.news_id)
         print("event_id:", event.event_id)
@@ -105,7 +108,7 @@ class AggregationService:
         event = Event(
             title=article.title,
             summary=article.content[:200] if article.content else "",
-            heat=analysis.heat_score if analysis.heat_score else 0,
+            heat=0,
             risk_level=analysis.risk_level,
             stage=analysis.stage,
             embedding=analysis.embedding,
