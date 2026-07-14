@@ -109,6 +109,11 @@ class Analysis(Base):
     )
 
 
+    embedding = Column(
+        JSON
+    )
+
+
     created_at = Column(
         DateTime,
         default=datetime.utcnow

@@ -3,6 +3,7 @@
 from typing import Dict, List
 
 from .dependencies import check_required_dependencies
+from .embedding import generate_embedding
 from .heat_score import calculate_heat_score, judge_risk_level
 from .keyword_extract import extract_keywords
 from .lifecycle import predict_lifecycle
@@ -39,6 +40,7 @@ def analyze_news(news: Dict, all_news: List[Dict] | None = None, previous_heat_s
     heat_score = calculate_heat_score(keywords, sentiment, similar_news, news)
     risk_level = judge_risk_level(heat_score, sentiment)
     stage = predict_lifecycle(news, all_news, heat_score, similar_news, previous_heat_score)
+    embedding = generate_embedding(text)
 
     return {
         "news_id": news.get("news_id"),
@@ -54,6 +56,7 @@ def analyze_news(news: Dict, all_news: List[Dict] | None = None, previous_heat_s
         "stage": stage,
         "risk_level": risk_level,
         "similar_news": similar_news,
+        "embedding": embedding,
     }
 
 

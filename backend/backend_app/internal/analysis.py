@@ -228,7 +228,10 @@ def receive_analysis(
         risk_level=data.risk_level,
 
 
-        similar_news=data.similar_news
+        similar_news=data.similar_news,
+
+
+        embedding=data.embedding
 
     )
 

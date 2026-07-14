@@ -72,3 +72,8 @@ class Event(Base):
     extra=Column(
         JSON
     )
+
+
+    embedding=Column(
+        JSON
+    )

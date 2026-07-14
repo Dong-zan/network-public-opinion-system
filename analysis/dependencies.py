@@ -35,11 +35,16 @@ def check_required_dependencies() -> None:
     except ImportError:
         missing.append("scikit-learn")
 
+    try:
+        import_module("sentence_transformers")
+    except ImportError:
+        missing.append("sentence-transformers")
+
     if missing:
         raise AnalysisDependencyError(
             "analysis 模块缺少必要依赖："
             + "、".join(missing)
-            + "。请先安装 jieba、snownlp、scikit-learn 后再运行分析。"
+            + "。请先安装 jieba、snownlp、scikit-learn、sentence-transformers 后再运行分析。"
         )
 
     _CHECKED = True
@@ -65,3 +70,8 @@ def get_sklearn_similarity_tools():
     vectorizer_module = import_module("sklearn.feature_extraction.text")
     pairwise_module = import_module("sklearn.metrics.pairwise")
     return vectorizer_module.TfidfVectorizer, pairwise_module.cosine_similarity
+
+
+def get_sentence_transformer_class():
+    check_required_dependencies()
+    return import_module("sentence_transformers").SentenceTransformer

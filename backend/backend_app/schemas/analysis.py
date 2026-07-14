@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from typing import List, Optional
 
@@ -59,3 +59,8 @@ class AnalysisCreate(BaseModel):
 
 
     similar_news: List[int] = []
+
+
+    # 单新闻语义向量，由4号生成，供1号事件聚合使用
+
+    embedding: List[float] = Field(min_length=768, max_length=768)

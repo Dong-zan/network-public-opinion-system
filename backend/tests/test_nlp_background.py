@@ -64,6 +64,7 @@ class NLPClientTests(unittest.TestCase):
             "stage": "成长期",
             "risk_level": "中",
             "similar_news": [],
+            "embedding": [1.0] + [0.0] * 767,
         }
         mock_post.return_value = response
 
@@ -73,6 +74,7 @@ class NLPClientTests(unittest.TestCase):
 
         self.assertEqual(result.news_id, 101)
         self.assertEqual(result.summary, "摘要")
+        self.assertEqual(len(result.embedding), 768)
         request_payload = mock_post.call_args.kwargs["json"]
         self.assertEqual(request_payload["news_id"], 101)
         self.assertEqual(request_payload["title"], "测试新闻")
@@ -171,6 +173,7 @@ class NLPBackgroundTaskTests(unittest.TestCase):
             "stage": "成长期",
             "risk_level": "中",
             "similar_news": [],
+            "embedding": [1.0] + [0.0] * 767,
         }
 
         from backend_app.schemas.analysis import AnalysisCreate
@@ -192,6 +195,7 @@ class NLPBackgroundTaskTests(unittest.TestCase):
         self.assertIsNotNone(saved_article.event_id)
         self.assertEqual(saved_analysis.event_id, saved_article.event_id)
         self.assertEqual(saved_analysis.summary, "自动摘要")
+        self.assertEqual(len(saved_analysis.embedding), 768)
         mock_try_generate_report.assert_called_once_with(
             saved_article.event_id
         )
