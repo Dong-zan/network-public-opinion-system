@@ -32,8 +32,8 @@ crawler/
 ```
 新闻网站（4源16频道）                     微博（1源30热搜词，每词3条帖子）
     │                                        │
-    ├─ 人民网（7频道）                       ├─ 热搜API → 热搜榜TOP40
-    ├─ 新华网（3频道）                       ├─ 逐词搜索帖子（每词1条）
+    ├─ 人民网（7频道）                       ├─ 热搜API → 热搜榜TOP30
+    ├─ 新华网（3频道）                       ├─ 逐词搜索帖子（每词3条）
     ├─ 中新网（2频道）                       └─ 查询用户认证信息（大V/官媒/普通）
     └─ 新浪新闻（4频道）                         │
     │                                        ▼
@@ -145,7 +145,7 @@ python -m crawler.run --loop 10
     "name": "weibo",
     "label": "微博",
     "hot_search_url": "https://weibo.com/ajax/side/hotSearch",
-    "topics_per_run": 40,        # 取前N个热搜词
+    "topics_per_run": 30,        # 取前N个热搜词
     "posts_per_topic": 1,        # 每词采几条帖子
 }
 ```
