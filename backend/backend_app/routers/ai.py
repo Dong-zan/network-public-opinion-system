@@ -7,10 +7,11 @@ from backend_app.database import get_db
 
 
 from backend_app.services.ai_service import AIService
+from backend_app.services.ai_provider import AIProviderError
 
 from backend_app.models.ai_result import AIResult
 
-from backend_app.schemas.ai import AIAsk
+from backend_app.schemas.ai import AIAsk, AIVerifyRequest
 
 
 router=APIRouter(
@@ -20,6 +21,13 @@ router=APIRouter(
     tags=["AI分析"]
 
 )
+
+
+def _raise_ai_http_error(exc: AIProviderError):
+    raise HTTPException(
+        status_code=exc.status_code,
+        detail=str(exc),
+    ) from exc
 
 
 
@@ -37,13 +45,13 @@ def ask_ai(
     service=AIService(db)
 
 
-    answer=service.ask(
-
-        data.event_id,
-
-        data.question
-
-    )
+    try:
+        answer=service.ask(
+            data.event_id,
+            data.question
+        )
+    except AIProviderError as exc:
+        _raise_ai_http_error(exc)
 
 
 
@@ -76,11 +84,12 @@ def generate_report(
     service=AIService(db)
 
 
-    result=service.generate_report(
-
-        event_id
-
-    )
+    try:
+        result=service.generate_report(
+            event_id
+        )
+    except AIProviderError as exc:
+        _raise_ai_http_error(exc)
 
 
     return {
@@ -138,7 +147,7 @@ def get_report(
 @router.post("/verify")
 def verify_article(
 
-    data:dict,
+    data:AIVerifyRequest,
 
     db:Session=Depends(get_db)
 
@@ -148,18 +157,14 @@ def verify_article(
     service = AIService(db)
 
 
-    result = service.verify(
-
-        data["event_id"],
-
-        data["news_id"],
-
-        data.get(
-            "max_claims",
-            5
+    try:
+        verification = service.save_verify_result(
+            data.event_id,
+            data.news_id,
+            data.max_claims,
         )
-
-    )
+    except AIProviderError as exc:
+        _raise_ai_http_error(exc)
 
 
     return {
@@ -168,7 +173,7 @@ def verify_article(
 
         "message":"success",
 
-        "data":result
+        "data":verification.result_json
 
     }
 
@@ -183,10 +188,16 @@ def verify_news(
     service = AIService(db)
 
 
-    result = service.verify(
+    verification = service.get_verify_result(
         event_id,
-        news_id
+        news_id,
     )
+
+    if not verification:
+        raise HTTPException(
+            status_code=404,
+            detail="Article verification not found",
+        )
 
 
     return {
@@ -195,6 +206,6 @@ def verify_news(
 
         "message":"success",
 
-        "data":result
+        "data":verification.result_json
 
     }

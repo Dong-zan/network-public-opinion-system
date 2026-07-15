@@ -3,3 +3,4 @@ from backend_app.models.event import Event
 from backend_app.models.analysis import Analysis
 from backend_app.models.ai_result import AIResult
 from backend_app.models.event_heat_history import EventHeatHistory
+from backend_app.models.article_verification import ArticleVerification

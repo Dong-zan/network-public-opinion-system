@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from app.services.claim_extractor import AtomicClaim, ClaimExtractor
 from app.services.event_evolution_analyzer import EventEvolutionAnalyzer
+from app.services.generic_atomic_claim_matcher import GenericAtomicClaimMatcher
 
 
 @dataclass(frozen=True)
@@ -14,8 +15,13 @@ class StanceDecision:
 
 
 class StanceClassifier:
-    def __init__(self, extractor: ClaimExtractor | None = None) -> None:
+    def __init__(
+        self,
+        extractor: ClaimExtractor | None = None,
+        generic_matcher: GenericAtomicClaimMatcher | None = None,
+    ) -> None:
         self.extractor = extractor or ClaimExtractor()
+        self.generic_matcher = generic_matcher or GenericAtomicClaimMatcher()
 
     def classify(
         self,
@@ -25,8 +31,23 @@ class StanceClassifier:
         target_publish_time: str | None = None,
         evidence_publish_time: str | None = None,
     ) -> StanceDecision:
-        target = self._as_claim(claim)
         evidence_claims = [item for _, item in self.extractor.extract_text(evidence)]
+        return self.classify_atomic_claims(
+            claim,
+            evidence_claims,
+            target_publish_time=target_publish_time,
+            evidence_publish_time=evidence_publish_time,
+        )
+
+    def classify_atomic_claims(
+        self,
+        claim: AtomicClaim | str,
+        evidence_claims: list[AtomicClaim],
+        *,
+        target_publish_time: str | None = None,
+        evidence_publish_time: str | None = None,
+    ) -> StanceDecision:
+        target = self._as_claim(claim)
         if not evidence_claims:
             return StanceDecision("irrelevant", "no_comparable_fact", 0.0)
         ranked = sorted(
@@ -85,8 +106,8 @@ class StanceClassifier:
         )
         return StanceDecision(stance, reason, round(relevance, 3))
 
-    @staticmethod
     def _compare_same_type(
+        self,
         target: AtomicClaim,
         evidence: AtomicClaim,
         *,
@@ -146,7 +167,8 @@ class StanceClassifier:
             return StanceClassifier._compare_status(target, evidence, "conclusion_status")
         if target.claim_type == "quantity":
             return StanceClassifier._compare_quantity(target, evidence)
-        return "related", "unstructured_claim_not_deterministically_comparable"
+        generic = self.generic_matcher.match(target, evidence)
+        return generic.stance, generic.reason_code
 
     @staticmethod
     def _compare_casualty(target: AtomicClaim, evidence: AtomicClaim) -> tuple[str, str]:

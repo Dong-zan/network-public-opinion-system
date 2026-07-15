@@ -77,25 +77,30 @@ class VerificationService:
             update={"content": target.content[: self.article_max_chars]}
         )
         claims = self.extractor.extract(bounded_target, max_claims)
+        atomic_claims = self.extractor.atomize_claims(claims)
         selection = self.retriever.select_candidates(event.articles, target)
 
-        claim_results = []
+        atomic_verifications = []
         sentence_limit_applied = False
         evidence_article_truncated = False
         evolving_information = False
-        for index, claim in enumerate(claims, start=1):
+        for item in atomic_claims:
+            claim = self.extractor.normalize_atomized_claim(item)
             result, sentence_limited, article_truncated, evolved = self._verify_claim(
-                claim_id=index,
+                claim_id=item.atomic_claim_id,
                 claim=claim,
                 candidates=selection.articles,
                 event=event,
                 target=target,
             )
-            claim_results.append(result)
+            atomic_verifications.append((item, result))
             sentence_limit_applied = sentence_limit_applied or sentence_limited
             evidence_article_truncated = evidence_article_truncated or article_truncated
             evolving_information = evolving_information or evolved
 
+        claim_results, parent_weights = self._aggregate_parent_claims(
+            atomic_verifications
+        )
         overall_verdict = self._overall_verdict(claim_results)
         verifiable_count = sum(
             result.verdict != "not_verifiable" for result in claim_results
@@ -109,7 +114,11 @@ class VerificationService:
             if verifiable_count
             else 0.0
         )
-        evidence_score = self.scorer.score(claim_results, overall_verdict)
+        evidence_score = self.scorer.score(
+            claim_results,
+            overall_verdict,
+            weights=parent_weights,
+        )
         risk_flags = self._risk_flags(
             target=target,
             results=claim_results,
@@ -146,6 +155,10 @@ class VerificationService:
             overall_verdict=overall_verdict,
             evidence_score=evidence_score,
             claim_results=claim_results,
+            atomic_claims=[
+                self._atomic_claim_payload(item, result)
+                for item, result in atomic_verifications
+            ],
             risk_flags=risk_flags,
             limitations=limitations,
             verifiable_claim_count=verifiable_count,
@@ -191,6 +204,151 @@ class VerificationService:
         )
         display_result = self.display_builder.build(event, explained_response)
         return explained_response.model_copy(update={"display_result": display_result})
+
+    def _aggregate_parent_claims(
+        self,
+        atomic_verifications,
+    ) -> tuple[list[ClaimVerificationResult], list[float]]:
+        grouped = {}
+        for item, result in atomic_verifications:
+            grouped.setdefault(
+                item.parent_claim_id,
+                {"parent_claim": item.parent_claim, "results": []},
+            )["results"].append(result)
+
+        parent_results = []
+        parent_weights = []
+        for parent_claim_id, group in grouped.items():
+            results = group["results"]
+            verdict = self._overall_verdict(results)
+            evidence = self._unique_verification_evidence(
+                item for result in results for item in result.evidence
+            )
+            context_evidence = self._unique_context_evidence(
+                item for result in results for item in result.context_evidence
+            )
+            support_sources, contradict_sources = self._stance_clusters(evidence)
+            limitations = self._stable_unique(
+                item for result in results for item in result.limitations
+            )
+            explanation = (
+                results[0].explanation
+                if len(results) == 1
+                else self._parent_claim_explanation(verdict, results)
+            )
+            parent_score = self.scorer.score(results, verdict)
+            parent_results.append(
+                ClaimVerificationResult(
+                    claim_id=parent_claim_id,
+                    claim=group["parent_claim"],
+                    verdict=verdict,
+                    independent_source_count=len(
+                        support_sources | contradict_sources
+                    ),
+                    evidence=evidence,
+                    context_evidence=context_evidence,
+                    limitations=limitations,
+                    evidence_score=parent_score,
+                    explanation=explanation,
+                )
+            )
+            parent_weights.append(
+                float(
+                    sum(
+                        self.scorer.score_claim(result) is not None
+                        for result in results
+                    )
+                    if parent_score > 0
+                    else 0
+                )
+            )
+        return parent_results, parent_weights
+
+    @staticmethod
+    def _atomic_claim_payload(item, result: ClaimVerificationResult) -> dict:
+        relation_results = [
+            {
+                "news_id": evidence.news_id,
+                "source": evidence.source,
+                "url": evidence.url,
+                "quote": evidence.quote,
+                "relation": evidence.stance,
+                "reason_code": evidence.reason_code,
+                "relevance_score": evidence.relevance_score,
+            }
+            for evidence in result.evidence
+        ]
+        relation_results.extend(
+            {
+                "news_id": evidence.news_id,
+                "source": evidence.source,
+                "url": evidence.url,
+                "quote": evidence.quote,
+                "relation": evidence.relation,
+                "reason_code": evidence.reason_code,
+                "relevance_score": evidence.relevance_score,
+            }
+            for evidence in result.context_evidence
+        )
+        return {
+            "atomic_claim_id": item.atomic_claim_id,
+            "parent_claim_id": item.parent_claim_id,
+            "parent_claim": item.parent_claim,
+            "claim": item.text,
+            "subject": item.subject,
+            "predicate": item.predicate,
+            "object": item.object,
+            "claim_type": item.claim_type,
+            "time": item.time,
+            "location": item.location,
+            "polarity": item.polarity,
+            "certainty": item.certainty,
+            "inherited_context": item.inherited_context,
+            "verdict": result.verdict,
+            "independent_source_count": result.independent_source_count,
+            "evidence": result.evidence,
+            "context_evidence": result.context_evidence,
+            "relation_results": relation_results,
+            "limitations": result.limitations,
+            "evidence_score": result.evidence_score,
+            "explanation": result.explanation,
+        }
+
+    @staticmethod
+    def _unique_verification_evidence(items) -> list[VerificationEvidence]:
+        result = []
+        seen = set()
+        for item in items:
+            key = (str(item.news_id), item.quote, item.stance)
+            if key not in seen:
+                seen.add(key)
+                result.append(item)
+        return result
+
+    @staticmethod
+    def _unique_context_evidence(items) -> list[VerificationContextEvidence]:
+        result = []
+        seen = set()
+        for item in items:
+            key = (str(item.news_id), item.quote, item.relation)
+            if key not in seen:
+                seen.add(key)
+                result.append(item)
+        return result
+
+    @staticmethod
+    def _parent_claim_explanation(
+        verdict: VerificationVerdict,
+        results: list[ClaimVerificationResult],
+    ) -> str:
+        determinate = sum(
+            result.verdict in {"supported", "contradicted", "conflicting"}
+            for result in results
+        )
+        return (
+            f"父主张包含{len(results)}个原子主张，其中{determinate}个形成了确定性结论；"
+            f"聚合结果为{verdict}。"
+        )
 
     def _verify_claim(
         self,

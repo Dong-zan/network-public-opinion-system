@@ -113,6 +113,44 @@ class ClaimVerificationResult(BaseModel):
     explanation: str | None = None
 
 
+class AtomicClaimResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    atomic_claim_id: int = Field(ge=1)
+    parent_claim_id: int = Field(ge=1)
+    parent_claim: NonEmptyText
+    claim: NonEmptyText
+    subject: str | None = None
+    predicate: str | None = None
+    object: str | None = None
+    claim_type: str | None = None
+    time: str | None = None
+    location: str | None = None
+    polarity: str | None = None
+    certainty: str | None = None
+    inherited_context: dict[str, str] = Field(default_factory=dict)
+    verdict: VerificationVerdict
+    independent_source_count: int = Field(ge=0)
+    evidence: list[VerificationEvidence] = Field(default_factory=list)
+    context_evidence: list[VerificationContextEvidence] = Field(default_factory=list)
+    relation_results: list["AtomicClaimRelationResult"] = Field(default_factory=list)
+    limitations: list[NonEmptyText] = Field(default_factory=list)
+    evidence_score: float | None = Field(default=None, ge=0, le=100)
+    explanation: str | None = None
+
+
+class AtomicClaimRelationResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    news_id: int | str
+    source: str = ""
+    url: str = ""
+    quote: NonEmptyText
+    relation: Literal["supports", "contradicts", "related", "updates"]
+    reason_code: str | None = None
+    relevance_score: float | None = Field(default=None, ge=0, le=1)
+
+
 class EvidenceAssessment(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -228,6 +266,7 @@ class VerificationResponse(BaseModel):
     evidence_score: float = Field(ge=0, le=100)
     score_type: Literal["heuristic_evidence_score"] = "heuristic_evidence_score"
     claim_results: list[ClaimVerificationResult] = Field(default_factory=list)
+    atomic_claims: list[AtomicClaimResult] = Field(default_factory=list)
     risk_flags: list[NonEmptyText] = Field(default_factory=list)
     limitations: list[NonEmptyText] = Field(default_factory=list)
     verifiable_claim_count: int = Field(default=0, ge=0)

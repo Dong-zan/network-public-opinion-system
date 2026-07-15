@@ -7,7 +7,9 @@ from backend_app.models.event import Event
 from backend_app.models.article import Article
 from backend_app.models.analysis import Analysis
 from backend_app.models.ai_result import AIResult
-from backend_app.services.ai_provider import RealAIProvider
+from backend_app.models.event_heat_history import EventHeatHistory
+from backend_app.models.article_verification import ArticleVerification
+from backend_app.services.ai_provider import AIProviderError, RealAIProvider
 
 
 
@@ -68,6 +70,15 @@ class AIService:
             Analysis
         ).filter(
             Analysis.event_id == event_id
+        ).all()
+
+        heat_history = self.db.query(
+            EventHeatHistory
+        ).filter(
+            EventHeatHistory.event_id == event_id
+        ).order_by(
+            EventHeatHistory.created_at.asc(),
+            EventHeatHistory.id.asc()
         ).all()
 
 
@@ -349,7 +360,21 @@ class AIService:
 
                     "risk_level":
 
-                        event.risk_level or ""
+                        event.risk_level or "",
+
+
+
+                    "history": [
+                        {
+                            "time": (
+                                item.created_at.isoformat(sep=" ")
+                                if item.created_at
+                                else None
+                            ),
+                            "heat": item.heat,
+                        }
+                        for item in heat_history
+                    ]
 
                 }
 
@@ -485,58 +510,57 @@ class AIService:
         )
 
 
-        ai = self.db.query(
-            AIResult
+        verdict = result.get("overall_verdict")
+        evidence_score = result.get("evidence_score")
+        if not isinstance(verdict, str) or not verdict.strip():
+            raise AIProviderError(
+                "AI service returned an invalid verification response",
+                502,
+            )
+        if isinstance(evidence_score, bool) or not isinstance(
+            evidence_score,
+            (int, float),
+        ):
+            raise AIProviderError(
+                "AI service returned an invalid verification response",
+                502,
+            )
+
+        verification = ArticleVerification(
+            event_id=event_id,
+            news_id=news_id,
+            status="success",
+            overall_verdict=verdict,
+            evidence_score=float(evidence_score),
+            result_json=result,
+            provider=self.provider.provider_name,
+        )
+        self.db.add(verification)
+
+        try:
+            self.db.commit()
+            self.db.refresh(verification)
+        except Exception:
+            self.db.rollback()
+            raise
+
+        return verification
+
+    def get_verify_result(
+        self,
+        event_id: int,
+        news_id: int,
+    ):
+        return self.db.query(
+            ArticleVerification
         ).filter(
-            AIResult.event_id == event_id
+            ArticleVerification.event_id == event_id,
+            ArticleVerification.news_id == news_id,
+            ArticleVerification.status == "success",
+        ).order_by(
+            ArticleVerification.created_at.desc(),
+            ArticleVerification.id.desc(),
         ).first()
-
-
-
-        if not ai:
-
-
-            print(
-                "[AI]创建真实性结果记录"
-            )
-
-
-            ai = AIResult(
-
-                event_id=event_id,
-
-                generated_at=datetime.now(),
-
-                provider="real_ai",
-
-                status="success"
-
-            )
-
-
-            self.db.add(ai)
-
-
-
-        ai.authenticity = result
-
-
-
-        self.db.commit()
-
-
-        self.db.refresh(
-            ai
-        )
-
-
-
-        print(
-            "[AI]真实性结果保存成功"
-        )
-
-
-        return ai
 
 
 
@@ -690,12 +714,14 @@ class AIService:
 
                 generated_at=datetime.now(),
 
-                provider="real_ai"
+                provider=self.provider.provider_name
 
             )
 
 
             self.db.add(ai)
+
+        ai.provider = self.provider.provider_name
 
 
 

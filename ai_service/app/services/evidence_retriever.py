@@ -164,9 +164,14 @@ class EvidenceRetriever:
             if not ranked or ranked[0][0] < 0.2:
                 continue
             _, _, quote = ranked[0]
-            decision = self.classifier.classify(
+            evidence_atomic_claims = [
+                claim
+                for item in self.extractor.atomizer.atomize(quote)
+                for claim in self.extractor.normalize_atomized_evidence(item)
+            ]
+            decision = self.classifier.classify_atomic_claims(
                 claim,
-                quote,
+                evidence_atomic_claims,
                 target_publish_time=target_publish_time,
                 evidence_publish_time=article.publish_time,
             )

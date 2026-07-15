@@ -1,8 +1,9 @@
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from app.schemas.event import Article
+from app.services.claim_atomizer import AtomizedClaim, ClaimAtomizer
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,11 @@ class AtomicClaim:
     modality_reason: str | None
     slots: dict[str, Any]
     verifiable: bool
+    subject: str | None = None
+    predicate: str | None = None
+    object: str | None = None
+    time: str | None = None
+    location: str | None = None
 
 
 class ClaimExtractor:
@@ -53,6 +59,9 @@ class ClaimExtractor:
         "other": 10,
     }
 
+    def __init__(self, atomizer: ClaimAtomizer | None = None) -> None:
+        self.atomizer = atomizer or ClaimAtomizer()
+
     def extract(self, article: Article, max_claims: int) -> list[AtomicClaim]:
         candidates = self.extract_text(article.content)
         best_by_identity: dict[tuple[Any, ...], tuple[int, AtomicClaim]] = {}
@@ -71,6 +80,61 @@ class ClaimExtractor:
             if len(result) >= max_claims:
                 break
         return result
+
+    def atomize_claims(self, claims: list[AtomicClaim]) -> list[AtomizedClaim]:
+        quotes = [claim.target_quote.strip() for claim in claims if claim.target_quote.strip()]
+        parent_claims = []
+        for quote in quotes:
+            if quote in parent_claims:
+                continue
+            if any(quote != candidate and quote in candidate for candidate in quotes):
+                continue
+            parent_claims.append(quote)
+        return self.atomizer.atomize_many(parent_claims)
+
+    def normalize_atomized_claim(self, item: AtomizedClaim) -> AtomicClaim:
+        extracted = self.extract(Article(content=item.text), 1)
+        claim = extracted[0] if extracted else AtomicClaim(
+            text=item.text,
+            target_quote=item.text,
+            claim_type="other",
+            certainty="asserted",
+            polarity="affirmative",
+            modality_reason=None,
+            slots={},
+            verifiable=True,
+        )
+        return self._apply_atomized_structure(claim, item)
+
+    def normalize_atomized_evidence(self, item: AtomizedClaim) -> list[AtomicClaim]:
+        extracted = [claim for _, claim in self.extract_text(item.text)]
+        if not extracted:
+            return [self.normalize_atomized_claim(item)]
+        return [
+            self._apply_atomized_structure(claim, item)
+            for claim in extracted
+        ]
+
+    @staticmethod
+    def _apply_atomized_structure(
+        claim: AtomicClaim,
+        item: AtomizedClaim,
+    ) -> AtomicClaim:
+        generic_claim = claim.claim_type == "other"
+        return replace(
+            claim,
+            subject=item.subject,
+            predicate=item.predicate,
+            object=item.object,
+            time=item.time,
+            location=item.location,
+            polarity=(item.polarity or claim.polarity) if generic_claim else claim.polarity,
+            certainty=(
+                (item.certainty or claim.certainty)
+                if generic_claim
+                else claim.certainty
+            ),
+        )
 
     def extract_text(self, content: str) -> list[tuple[int, AtomicClaim]]:
         candidates = []
