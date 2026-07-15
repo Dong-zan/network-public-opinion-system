@@ -1,0 +1,44 @@
+{
+  "event": {
+    "event_id": 101,
+    "title": "示例事故事件",
+    "summary": "当前材料显示，相关处置工作正在进行。",
+    "update_time": "2026-07-08 12:00:00",
+    "articles": [
+      {
+        "news_id": 1001,
+        "title": "事故现场处置正在进行",
+        "content": "7月8日10时，事故现场处置工作正在进行，具体原因仍在调查。",
+        "source": "示例媒体甲",
+        "url": "https://example.com/news/1001",
+        "publish_time": "2026-07-08 10:00:00",
+        "platform": "新闻网站",
+        "is_official": false,
+        "account_type": "media",
+        "source_type": "news"
+      }
+    ],
+    "analysis": {
+      "keywords": ["事故", "救援", "调查"],
+      "sentiment": {
+        "positive": 0.1,
+        "neutral": 0.3,
+        "negative": 0.6
+      },
+      "heat": 85,
+      "stage": "高潮期",
+      "risk_level": "高",
+      "history": [
+        {
+          "time": "2026-07-08 10:00:00",
+          "heat": 70,
+          "article_count": 1,
+          "positive": 0.1,
+          "neutral": 0.4,
+          "negative": 0.5
+        }
+      ]
+    }
+  },
+  "question": "这个事件的主要风险点是什么？"
+}

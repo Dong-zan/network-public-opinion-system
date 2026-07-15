@@ -1,0 +1,44 @@
+{
+  "target_news_id": 1001,
+  "overall_verdict": "conflicting",
+  "evidence_score": 50,
+  "score_type": "heuristic_evidence_score",
+  "claim_results": [
+    {
+      "claim_id": 1,
+      "claim": "截至10时，事故造成3人受伤",
+      "verdict": "conflicting",
+      "independent_source_count": 2,
+      "evidence": [
+        {
+          "news_id": 1002,
+          "source": "示例媒体乙",
+          "url": "https://example.com/news/1002",
+          "quote": "截至10时，另一报道提到事故造成3人受伤",
+          "stance": "supports",
+          "reason_code": "same_casualty_count",
+          "relevance_score": 1.0
+        },
+        {
+          "news_id": 1003,
+          "source": "示例媒体丙",
+          "url": "https://example.com/news/1003",
+          "quote": "截至10时，有报道提到事故造成5人受伤",
+          "stance": "contradicts",
+          "reason_code": "casualty_count_conflict",
+          "relevance_score": 1.0
+        }
+      ],
+      "context_evidence": [],
+      "limitations": ["不同独立来源对受伤人数存在冲突。"],
+      "evidence_score": 50,
+      "explanation": "支持与反驳证据同时存在，当前材料无法形成单一稳定结论。"
+    }
+  ],
+  "risk_flags": ["conflicting_evidence"],
+  "limitations": ["当前材料中的独立来源对受伤人数存在冲突。"],
+  "verifiable_claim_count": 1,
+  "determinate_claim_count": 1,
+  "verification_coverage": 100,
+  "score_explanation": "evidence_score表示当前核验结论的启发式证据强度，不是文章真实性概率。"
+}

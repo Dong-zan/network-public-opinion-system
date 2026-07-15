@@ -1,0 +1,38 @@
+{
+  "event_id": 101,
+  "nodes": [
+    {"node_id": "event:example", "node_type": "event", "label": "示例事故事件", "attributes": {"event_id": 101}},
+    {"node_id": "article:1001", "node_type": "article", "label": "伤亡情况初报", "attributes": {"news_id": 1001, "source": "示例媒体甲", "url": "https://example.com/news/1001"}},
+    {"node_id": "article:1002", "node_type": "article", "label": "另一来源伤亡信息", "attributes": {"news_id": 1002, "source": "示例媒体乙", "url": "https://example.com/news/1002"}},
+    {"node_id": "article:1003", "node_type": "article", "label": "不同伤亡说法", "attributes": {"news_id": 1003, "source": "示例媒体丙", "url": "https://example.com/news/1003"}},
+    {"node_id": "source:a", "node_type": "source", "label": "示例媒体甲", "attributes": {}},
+    {"node_id": "source:b", "node_type": "source", "label": "示例媒体乙", "attributes": {}},
+    {"node_id": "source:c", "node_type": "source", "label": "示例媒体丙", "attributes": {}},
+    {"node_id": "claim:3a", "node_type": "claim", "label": "事故造成3人受伤", "attributes": {"claim_type": "casualty"}},
+    {"node_id": "claim:3b", "node_type": "claim", "label": "事故造成3人受伤", "attributes": {"claim_type": "casualty"}},
+    {"node_id": "claim:5", "node_type": "claim", "label": "事故造成5人受伤", "attributes": {"claim_type": "casualty"}}
+  ],
+  "edges": [
+    {"edge_id": "edge:contains:1", "edge_type": "contains", "source_node_id": "event:example", "target_node_id": "article:1001", "quote": null, "reason_code": null, "attributes": {}},
+    {"edge_id": "edge:contains:2", "edge_type": "contains", "source_node_id": "event:example", "target_node_id": "article:1002", "quote": null, "reason_code": null, "attributes": {}},
+    {"edge_id": "edge:contains:3", "edge_type": "contains", "source_node_id": "event:example", "target_node_id": "article:1003", "quote": null, "reason_code": null, "attributes": {}},
+    {"edge_id": "edge:published:1", "edge_type": "published_by", "source_node_id": "article:1001", "target_node_id": "source:a", "quote": null, "reason_code": null, "attributes": {}},
+    {"edge_id": "edge:published:2", "edge_type": "published_by", "source_node_id": "article:1002", "target_node_id": "source:b", "quote": null, "reason_code": null, "attributes": {}},
+    {"edge_id": "edge:published:3", "edge_type": "published_by", "source_node_id": "article:1003", "target_node_id": "source:c", "quote": null, "reason_code": null, "attributes": {}},
+    {"edge_id": "edge:asserts:1", "edge_type": "asserts", "source_node_id": "article:1001", "target_node_id": "claim:3a", "quote": null, "reason_code": null, "attributes": {}},
+    {"edge_id": "edge:asserts:2", "edge_type": "asserts", "source_node_id": "article:1002", "target_node_id": "claim:3b", "quote": null, "reason_code": null, "attributes": {}},
+    {"edge_id": "edge:asserts:3", "edge_type": "asserts", "source_node_id": "article:1003", "target_node_id": "claim:5", "quote": null, "reason_code": null, "attributes": {}},
+    {"edge_id": "edge:support", "edge_type": "supports", "source_node_id": "claim:3a", "target_node_id": "claim:3b", "quote": "截至10时，事故造成3人受伤", "reason_code": "same_casualty_count", "attributes": {"symmetric": true, "independent_sources": true, "source_independence_known": true, "source_news_id": 1001, "target_news_id": 1002, "source_quote": "截至10时，事故造成3人受伤", "target_quote": "截至10时，另一报道提到事故造成3人受伤"}},
+    {"edge_id": "edge:contradiction", "edge_type": "contradicts", "source_node_id": "claim:3a", "target_node_id": "claim:5", "quote": "截至10时，事故造成3人受伤", "reason_code": "casualty_count_conflict", "attributes": {"symmetric": true, "independent_sources": true, "source_independence_known": true, "source_news_id": 1001, "target_news_id": 1003, "source_quote": "截至10时，事故造成3人受伤", "target_quote": "截至10时，有报道提到事故造成5人受伤"}}
+  ],
+  "claim_clusters": [
+    {"cluster_id": "claim-cluster:3", "claim_type": "casualty", "canonical_slots": {"count": 3, "casualty_type": "injured"}, "polarity": "affirmative", "certainty": "asserted", "certainty_values": ["asserted"], "verifiable": true, "claim_node_ids": ["claim:3a", "claim:3b"], "article_node_ids": ["article:1001", "article:1002"], "independent_source_count": 2, "asserting_independent_source_count": 2, "supporting_independent_source_count": 2, "contradicting_independent_source_count": 2, "updating_independent_source_count": 0, "status": "conflicting"},
+    {"cluster_id": "claim-cluster:5", "claim_type": "casualty", "canonical_slots": {"count": 5, "casualty_type": "injured"}, "polarity": "affirmative", "certainty": "asserted", "certainty_values": ["asserted"], "verifiable": true, "claim_node_ids": ["claim:5"], "article_node_ids": ["article:1003"], "independent_source_count": 1, "asserting_independent_source_count": 1, "supporting_independent_source_count": 0, "contradicting_independent_source_count": 2, "updating_independent_source_count": 0, "status": "conflicting"}
+  ],
+  "timeline": [
+    {"timeline_id": "timeline:1", "time": "10:00", "time_source": "reference_time", "time_precision": "time_only", "year_inferred": false, "normalized_time": null, "article_node_id": "article:1001", "claim_node_id": "claim:3a", "claim_type": "casualty", "summary": "截至10时，事故造成3人受伤", "related_edge_ids": []}
+  ],
+  "metrics": {"article_count": 3, "source_count": 3, "independent_source_count": 3, "claim_count": 3, "claim_cluster_count": 2, "support_edge_count": 1, "contradiction_edge_count": 1, "update_edge_count": 0, "duplicate_article_count": 0, "conflict_ratio": 1.0, "reprint_ratio": 0.0, "unresolved_claim_ratio": 0.0, "conflicting_cluster_count": 2, "verifiable_cluster_count": 2, "contradiction_edge_ratio": 0.5, "not_verifiable_cluster_count": 0, "logical_edge_count": 13, "returned_edge_count": 13, "omitted_relation_edge_count": 0, "omitted_edge_count_by_type": {}},
+  "risk_flags": ["conflicting_claims_present"],
+  "limitations": ["第一阶段仅分析当前事件输入中的文章，不联网搜索外部信息。"]
+}
