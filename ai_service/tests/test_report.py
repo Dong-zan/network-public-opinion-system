@@ -6,6 +6,7 @@ import pytest
 from app.llm.base import LLMProvider
 from app.llm.fake_provider import FakeLLMProvider
 from app.llm.prompt_types import PromptBundle
+from app.llm.report_prompts import build_report_prompt
 from app.main import app
 from app.schemas.event import EventContext
 from app.services.report_features import extract_report_features
@@ -74,6 +75,71 @@ def valid_report_dict() -> dict:
         "suggestions": ["持续监测后续信息。", "核验争议信息。"],
         "limitations": ["缺少明确事件发生时间。"],
     }
+
+
+def raw_identifier_report_dict() -> dict:
+    return {
+        "overview": {
+            "time": None,
+            "location": None,
+            "cause": "analysis.cause=None，仍待说明",
+            "persons": [],
+            "summary": "EventContext(event_id=9, news_id=79) 的事件概述。",
+        },
+        "summary": "当前 event_id=9，articles[0].news_id=79。",
+        "trend_analysis": "早期报道（news_id 79, 81）较集中，publish_time用于排序。",
+        "risk_analysis": (
+            "上游分析结果显示当前风险等级为“中”，heat值27.84，"
+            "sentiment以正面为主，analysis.risk_level=中。"
+        ),
+        "suggestions": [
+            "关注 quoted_news_ids 与 duplicate_group_id。",
+            "核验 reference_urls 和 source_count。",
+        ],
+        "limitations": ["heat_history与sentiment_history_count不足。"],
+    }
+
+
+def test_report_natural_language_hides_raw_internal_fields(event_payload) -> None:
+    event = EventContext.model_validate(report_payload(event_payload))
+    provider = SequenceProvider([json.dumps(raw_identifier_report_dict(), ensure_ascii=False)])
+    report = ReportService(provider=provider).generate(event)
+
+    visible = user_visible_text(report.model_dump())
+    lowered = visible.lower()
+    for internal_name in (
+        "heat",
+        "sentiment",
+        "news_id",
+        "event_id",
+        "publish_time",
+        "risk_level",
+        "quoted_news_ids",
+        "duplicate_group_id",
+        "reference_urls",
+        "source_count",
+        "eventcontext",
+        "articles[",
+        "analysis.",
+    ):
+        assert internal_name not in lowered
+    assert "79" not in visible
+    assert "81" not in visible
+    assert "热度" in visible
+    assert "情感倾向" in visible
+
+
+def test_report_prompt_uses_user_visible_input_labels(event_payload) -> None:
+    event = EventContext.model_validate(report_payload(event_payload))
+    prompt = build_report_prompt(event, event.articles, article_max_chars=1000)
+
+    assert "news_id" not in prompt.user_prompt.lower()
+    assert "event_id" not in prompt.user_prompt.lower()
+    assert "publish_time" not in prompt.user_prompt.lower()
+    assert '"heat"' not in prompt.user_prompt.lower()
+    assert '"sentiment"' not in prompt.user_prompt.lower()
+    assert "材料序号: 材料1" in prompt.user_prompt
+    assert '"热度"' in prompt.user_prompt
 
 
 class SequenceProvider(LLMProvider):

@@ -131,6 +131,9 @@ class SourceAssessment(BaseModel):
     risk_score: float = Field(ge=0, le=100)
     registered_source: bool | None = None
     canonical_name: NonEmptyText | None = None
+    source_category: NonEmptyText | None = None
+    ownership_type: NonEmptyText | None = None
+    registry_version: NonEmptyText | None = None
     hostname: NonEmptyText | None = None
     domain_match: bool | None = None
     metadata_coverage: float = Field(ge=0, le=100)
@@ -223,6 +226,7 @@ class CredibilityAssessment(BaseModel):
 class VerificationResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    event_id: int | str | None = None
     target_news_id: int | str
     overall_verdict: VerificationVerdict
     evidence_score: float = Field(ge=0, le=100)

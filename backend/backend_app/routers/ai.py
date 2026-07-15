@@ -6,11 +6,12 @@ from sqlalchemy.orm import Session
 from backend_app.database import get_db
 
 
-from backend_app.services.ai_service import AIService
+from backend_app.services.ai_provider import AIProviderError
+from backend_app.services.ai_service import AIResourceNotFoundError, AIService
 
 from backend_app.models.ai_result import AIResult
 
-from backend_app.schemas.ai import AIAsk
+from backend_app.schemas.ai import AIAsk, AIVerifyAPIResponse, AIVerifyRequest
 
 
 router=APIRouter(
@@ -57,7 +58,6 @@ def ask_ai(
         "data":answer
 
     }
-
 
 
 
@@ -135,10 +135,10 @@ def get_report(
         }
     }
 
-@router.post("/verify")
+@router.post("/verify", response_model=AIVerifyAPIResponse)
 def verify_article(
 
-    data:dict,
+    data:AIVerifyRequest,
 
     db:Session=Depends(get_db)
 
@@ -148,18 +148,21 @@ def verify_article(
     service = AIService(db)
 
 
-    result = service.verify(
+    try:
+        result = service.save_verify_result(
 
-        data["event_id"],
+            data.event_id,
 
-        data["news_id"],
+            data.news_id,
 
-        data.get(
-            "max_claims",
-            5
+            data.max_claims
+
         )
-
-    )
+    except (AIProviderError, AIResourceNotFoundError) as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.message
+        ) from exc
 
 
     return {
@@ -172,7 +175,10 @@ def verify_article(
 
     }
 
-@router.get("/verify/{event_id}/{news_id}")
+@router.get(
+    "/verify/{event_id}/{news_id}",
+    response_model=AIVerifyAPIResponse,
+)
 def verify_news(
     event_id:int,
     news_id:int,
@@ -183,10 +189,16 @@ def verify_news(
     service = AIService(db)
 
 
-    result = service.verify(
-        event_id,
-        news_id
-    )
+    try:
+        result = service.save_verify_result(
+            event_id,
+            news_id
+        )
+    except (AIProviderError, AIResourceNotFoundError) as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.message
+        ) from exc
 
 
     return {

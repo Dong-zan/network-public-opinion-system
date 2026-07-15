@@ -1,3 +1,5 @@
+import re
+
 from app.schemas.event import EventContext
 from app.schemas.verification import VerificationResponse
 from app.schemas.verification_explanation import (
@@ -21,7 +23,7 @@ class VerificationDisplayBuilder:
         "witness": "目击者",
         "social_account": "社交账号",
         "anonymous_source": "匿名来源",
-        "unknown": "来源类型未明确",
+        "unknown": "新闻来源",
     }
     _AUTHENTICATION_TERMS = (
         "注册表",
@@ -35,9 +37,24 @@ class VerificationDisplayBuilder:
         "来源身份已验证",
         "来源身份已经确认",
     )
-    _STANDARD_UNCERTAINTIES = (
-        "本次核验仅使用当前输入的新闻材料，没有联网检索其他报道。",
-        "当前结论表示输入材料之间的证据关系，不代表最终权威认定。",
+    _SINGLE_ARTICLE_UNCERTAINTY = (
+        "本次为单篇材料审阅，重点分析关键主张、文内依据、逻辑与表达质量；"
+        "未联网进行跨来源事实确认。"
+    )
+    _REPEATED_SINGLE_SOURCE_TERMS = (
+        "没有其他独立新闻",
+        "缺少足够独立",
+        "独立来源",
+        "独立证据",
+        "独立证据不足",
+        "独立来源数量",
+        "候选文章",
+        "无法确认或反驳",
+        "不能确认或反驳",
+        "尚不足以独立确认",
+        "跨来源事实确认",
+        "联网",
+        "外部信息",
     )
 
     def build(
@@ -48,6 +65,7 @@ class VerificationDisplayBuilder:
         explanation = response.ai_explanation
         if explanation is None:
             return None
+        single_article = len(event.articles) == 1
         source_assessments = {
             str(item.news_id): item for item in response.evidence_source_assessments
         }
@@ -72,12 +90,19 @@ class VerificationDisplayBuilder:
                 source_description = (
                     self._ROLE_LABELS[source_assessment.source_role]
                     if source_assessment is not None
-                    else "来源类型未明确"
+                    else "新闻来源"
                 )
                 key = (news_key, item.source, item.quote)
-                evidence_explanation = explained_evidence.get(
-                    key,
-                    self._relation_explanation(item),
+                relation = getattr(item, "stance", None) or getattr(
+                    item, "relation", "related"
+                )
+                evidence_explanation = (
+                    self._relation_explanation(item)
+                    if relation in {"related", "updates"}
+                    else explained_evidence.get(
+                        key,
+                        self._relation_explanation(item),
+                    )
                 )
                 evidence_explanations.add(evidence_explanation)
                 cards.append(
@@ -94,32 +119,31 @@ class VerificationDisplayBuilder:
                 )
 
         reasons = []
-        for value in [
-            *(item.explanation for item in explanation.why),
-            *(item.explanation for item in explanation.claim_explanations),
-        ]:
-            normalized = value.strip()
+        reason_values = [item.explanation for item in explanation.why]
+        if not reason_values:
+            reason_values = [
+                item.explanation for item in explanation.claim_explanations
+            ]
+        for value in reason_values:
+            normalized = self._content_focused_text(value)
             if (
                 normalized
+                and not (
+                    single_article
+                    and self._is_repeated_single_source_text(normalized)
+                )
                 and normalized not in evidence_explanations
                 and normalized not in {explanation.headline, explanation.conclusion}
                 and normalized not in reasons
             ):
                 reasons.append(normalized)
-        uncertainties = self._stable_unique(
-            [
-                *self._STANDARD_UNCERTAINTIES,
-                *self._without_authentication_text(explanation.limitations),
-                *self._without_authentication_text(response.limitations),
-                *(
-                    limitation
-                    for claim in response.claim_results
-                    for limitation in self._without_authentication_text(
-                        claim.limitations
-                    )
-                ),
+        if single_article:
+            uncertainties = [self._SINGLE_ARTICLE_UNCERTAINTY]
+        else:
+            uncertainties = [
+                f"本次共比较{len(event.articles)}篇事件材料，重点呈现共同信息、"
+                "报道差异与来源关系；结论对应当前材料范围。"
             ]
-        )[:12]
         conclusion = explanation.conclusion
         if conclusion.strip() == explanation.headline.strip():
             conclusion = VerificationAIExplanationValidator.overall_conclusion(
@@ -128,7 +152,15 @@ class VerificationDisplayBuilder:
         return VerificationDisplayResult(
             headline=explanation.headline,
             conclusion=conclusion,
-            reasons=reasons[:12],
+            analysis_mode=(
+                "single_article_audit"
+                if single_article
+                else "cross_source_verification"
+            ),
+            evidence_score_applicable=not single_article,
+            reasons=reasons[:5],
+            analysis_sections=explanation.why[:5],
+            claim_reviews=explanation.claim_explanations[:10],
             evidence_cards=cards[:20],
             uncertainties=uncertainties,
         )
@@ -136,12 +168,12 @@ class VerificationDisplayBuilder:
     @staticmethod
     def _relation_explanation(item) -> str:
         relation = getattr(item, "stance", None) or getattr(item, "relation", None)
-        source = item.source.strip() or f"news_id={item.news_id}对应来源"
+        source = item.source.strip() or "对应材料来源"
         return {
             "supports": f"{source}的这段原文与目标主张表述一致，因此作为支持证据。",
             "contradicts": f"{source}的这段原文与目标主张存在直接冲突，因此作为反驳证据。",
-            "updates": f"{source}的这段原文提供了较晚时点的信息更新，不作为直接支持或反驳。",
-            "related": f"{source}的这段原文与目标主张相关，但不足以直接支持或反驳。",
+            "updates": f"{source}的这段原文补充了较晚时点的信息，可用于梳理事件变化。",
+            "related": f"{source}的这段原文补充了相关背景和细节，可用于比较不同报道的侧重点。",
         }.get(relation, f"{source}的这段原文用于说明当前证据关系。")
 
     @staticmethod
@@ -153,10 +185,46 @@ class VerificationDisplayBuilder:
                 result.append(normalized)
         return result
 
+    @staticmethod
+    def _content_focused_text(value: str) -> str:
+        limiting_patterns = (
+            r"[^。！？]*未提供(?:主办方|官方|猫眼)[^。！？]*[。！？]",
+            r"[^。！？]*缺乏(?:独立|官方|直接)[^。！？]*[。！？]",
+            r"[^。！？]*无法独立[^。！？]*[。！？]",
+            r"[^。！？]*(?:尚待|仍需|需要)[^。！？]{0,30}(?:核实|确认)[^。！？]*[。！？]",
+            r"[^。！？]*不替代事实证据[。！？]?",
+            r"[^。！？]*(?:官方输入|上游来源角色标记)[^。！？]*[。！？]",
+            r"[^。！？]*(?:证据强度为|启发式评分|风险标签)[^。！？]*[。！？]",
+        )
+        normalized = " ".join(value.split())
+        normalized = re.sub(
+            r"([一二三四五六七八九十\d]+)篇独立来源",
+            r"\1篇不同材料",
+            normalized,
+        )
+        for pattern in limiting_patterns:
+            normalized = re.sub(pattern, "", normalized)
+        return normalized.strip()
+
     @classmethod
     def _without_authentication_text(cls, values: list[str]) -> list[str]:
         return [
             value
             for value in values
             if not any(term in value for term in cls._AUTHENTICATION_TERMS)
+        ]
+
+    @classmethod
+    def _is_repeated_single_source_text(cls, value: str) -> bool:
+        return any(term in value for term in cls._REPEATED_SINGLE_SOURCE_TERMS)
+
+    @classmethod
+    def _without_repeated_single_source_text(
+        cls,
+        values: list[str],
+    ) -> list[str]:
+        return [
+            value
+            for value in values
+            if not cls._is_repeated_single_source_text(value)
         ]

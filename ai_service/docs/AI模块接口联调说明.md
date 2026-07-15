@@ -87,7 +87,7 @@
 
 - **用途**：对目标文章中的原子事实主张做事件内多来源核验，不对整篇文章简单判真伪。
 - **请求**：`event: EventContext`（必填）、`target_news_id: int | str`（必填）、`max_claims: int`（可选，默认 `5`，范围 `1..10`）；根对象禁止额外字段。
-- **成功响应**：`target_news_id`、`overall_verdict`、`evidence_score`、固定 `score_type`、`claim_results`、`risk_flags`、`limitations`、计数字段和 `score_explanation`。
+- **成功响应**：`event_id`、`target_news_id`、`overall_verdict`、`evidence_score`、固定 `score_type`、`claim_results`、`risk_flags`、`limitations`、计数字段和 `score_explanation`。
 - **触发时机**：用户选择一篇文章核验时调用；必须同时提供该事件内的其他文章。
 - **DeepSeek**：不依赖 DeepSeek，不联网搜索。
 - **完整示例**：[请求](../ai_service/examples/verify-request.json)｜[成功响应](../ai_service/examples/verify-response.json)。

@@ -5,6 +5,15 @@ from abc import ABC, abstractmethod
 from backend_app.config import settings
 
 
+class AIProviderError(RuntimeError):
+    """An AI service failure that the backend can expose as an HTTP error."""
+
+    def __init__(self, status_code: int, message: str):
+        self.status_code = status_code
+        self.message = message
+        super().__init__(message)
+
+
 class AIProvider(ABC):
 
 
@@ -162,28 +171,74 @@ class RealAIProvider(AIProvider):
 
             )
 
+        except requests.exceptions.Timeout as exc:
+            raise AIProviderError(
+                503,
+                "AI service request timed out"
+            ) from exc
 
-            response.raise_for_status()
+        except requests.exceptions.ConnectionError as exc:
+            raise AIProviderError(
+                503,
+                "AI service is unavailable"
+            ) from exc
 
-
-            return response.json()
-
-
-
-        except requests.exceptions.RequestException as e:
-
-
-            return {
-
-
-                "error":True,
-
-                "message":str(e)
-
-            }
+        except requests.exceptions.RequestException as exc:
+            raise AIProviderError(
+                503,
+                "AI service is unavailable"
+            ) from exc
 
 
+        if response.status_code >= 400:
+            if response.status_code in {404, 422}:
+                status_code = response.status_code
+                message = self._error_message(response)
+            else:
+                status_code = 503
+                message = "AI service is unavailable"
 
+            raise AIProviderError(
+                status_code,
+                message
+            )
+
+
+        try:
+            result = response.json()
+        except ValueError as exc:
+            raise AIProviderError(
+                503,
+                "AI service returned invalid JSON"
+            ) from exc
+
+
+        if not isinstance(result, dict):
+            raise AIProviderError(
+                503,
+                "AI service response must be a JSON object"
+            )
+
+
+        return result
+
+
+    @staticmethod
+    def _error_message(response) -> str:
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+
+        if isinstance(body, dict):
+            detail = body.get("detail") or body.get("message")
+            if isinstance(detail, str) and detail.strip():
+                return detail
+            if detail:
+                return str(detail)
+
+        text = getattr(response, "text", "").strip()
+        return text or f"AI service returned HTTP {response.status_code}"
 
 
 

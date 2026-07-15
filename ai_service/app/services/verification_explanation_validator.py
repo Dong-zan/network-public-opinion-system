@@ -53,13 +53,28 @@ class VerificationAIExplanationValidator:
         "domain_match",
         "metadata_coverage",
         "provider_name",
+        "source_identity",
+        "classification",
+        "ownership",
     )
-    _STRONG_SOURCE_IDENTITY_PHRASES = (
-        "权威来源已确认",
+    _CONFIRMED_SOURCE_IDENTITY_PHRASES = (
         "来源身份已经确认",
         "来源身份已确认",
+    )
+    _CONFIRMED_OFFICIAL_SOURCE_PHRASES = (
+        "权威来源已确认",
         "官方来源已确认",
         "已验证权威来源",
+        "官方新闻媒体",
+    )
+    _UNSUPPORTED_TRUTH_PHRASES = (
+        "文章真实",
+        "内容属实",
+        "事实已确认",
+        "事实已经确认",
+        "新闻已证实",
+        "文章虚假",
+        "内容不实",
     )
     _AUTHENTICATION_TERMS = (
         "注册表",
@@ -71,6 +86,41 @@ class VerificationAIExplanationValidator:
         "身份验证",
         "身份未完成验证",
     )
+    _OPTIONAL_PROVENANCE_TERMS = (
+        "作者",
+        "记者",
+        "账号类型",
+        "官方标记",
+        "来源角色",
+        "来源类型",
+        "引用链接",
+        "参考链接",
+        "被引新闻",
+        "引用关系",
+        "转载关系",
+        "转发关系",
+        "重复分组",
+        "重复组",
+        "来源元数据",
+        "溯源元数据",
+        "元数据",
+    )
+    _DIRECT_ABSENCE_TERMS = (
+        "缺少",
+        "缺失",
+        "未提供",
+        "未获取",
+        "无法获取",
+        "未明确",
+        "为空",
+        "未知",
+    )
+    _SUFFIX_ABSENCE_TERMS = (
+        *_DIRECT_ABSENCE_TERMS,
+        "不足",
+        "较少",
+        "不完整",
+    )
     _EVIDENCE_REASON_TYPES = {
         "evidence",
         "support",
@@ -81,12 +131,18 @@ class VerificationAIExplanationValidator:
         "反驳证据",
         "冲突证据",
     }
+    _INTERNAL_REPRESENTATION_PATTERN = re.compile(
+        r"(?:\{\s*['\"][^{}]{0,80}['\"]\s*:|"
+        r"\b(?:BaseModel|Article|EventContext|Verification\w*)\s*\()"
+    )
 
     def validate(
         self,
         output: VerificationExplanationLLMOutput,
         response: VerificationResponse,
         score_breakdown: VerificationScoreBreakdown,
+        *,
+        grounding_text: str = "",
     ) -> VerificationAIExplanation | None:
         claims = {item.claim_id: item for item in response.claim_results}
         evidence_by_claim = self._evidence_by_claim(response.claim_results)
@@ -98,11 +154,13 @@ class VerificationAIExplanationValidator:
         allowed_numbers = self._number_tokens(
             json.dumps(response.model_dump(mode="json"), ensure_ascii=False)
             + json.dumps(score_breakdown.model_dump(mode="json"), ensure_ascii=False)
+            + grounding_text
         )
         score_numbers = self._number_tokens(
             json.dumps(score_breakdown.model_dump(mode="json"), ensure_ascii=False)
         )
         source_identity_confirmed = self._source_identity_confirmed(response)
+        source_official_confirmed = self._source_official_confirmed(response)
         verified_evidence_ids = {
             str(item.news_id)
             for item in response.evidence_source_assessments
@@ -122,6 +180,12 @@ class VerificationAIExplanationValidator:
                 if str(reference) in all_evidence_ids
             )
             if reason.type.casefold() in self._EVIDENCE_REASON_TYPES and not evidence_refs:
+                evidence_refs = self._stable_unique_refs(
+                    item.news_id
+                    for claim_id in claim_ids
+                    for item in evidence_by_claim[claim_id]
+                )
+            if reason.type.casefold() in self._EVIDENCE_REASON_TYPES and not evidence_refs:
                 continue
             if not self._text_is_safe(
                 (title, explanation),
@@ -129,6 +193,7 @@ class VerificationAIExplanationValidator:
                 source_identity_confirmed
                 or bool(evidence_refs)
                 and all(str(reference) in verified_evidence_ids for reference in evidence_refs),
+                source_official_confirmed and not evidence_refs,
             ):
                 continue
             reasons.append(
@@ -152,16 +217,17 @@ class VerificationAIExplanationValidator:
                 allowed_numbers,
                 verified_evidence_ids,
             )
-            if claim.verdict in {"supported", "contradicted", "conflicting"} and not evidence:
-                continue
+            if not evidence:
+                evidence = self._fallback_evidence(evidence_by_claim[item.claim_id])
             item_explanation = self._naturalize_user_text(item.explanation)
             item_conclusion = self._naturalize_user_text(item.conclusion)
             if not self._text_is_safe(
                 (item_explanation,),
                 allowed_numbers,
                 source_identity_confirmed,
+                source_official_confirmed,
             ):
-                continue
+                item_explanation = claim.explanation or self.claim_conclusion(claim)
             claim_explanations.append(
                 ClaimAIExplanation(
                     claim_id=claim.claim_id,
@@ -172,6 +238,7 @@ class VerificationAIExplanationValidator:
                             (item_conclusion,),
                             allowed_numbers,
                             source_identity_confirmed,
+                            source_official_confirmed,
                         )
                         and self._conclusion_matches_verdict(
                             item_conclusion,
@@ -184,12 +251,15 @@ class VerificationAIExplanationValidator:
                 )
             )
 
-        if not reasons and not claim_explanations:
-            return None
         proposed_headline = self._naturalize_user_text(output.headline)
         headline = (
             proposed_headline
-            if self._text_is_safe((proposed_headline,), allowed_numbers, source_identity_confirmed)
+            if self._text_is_safe(
+                (proposed_headline,),
+                allowed_numbers,
+                source_identity_confirmed,
+                source_official_confirmed,
+            )
             else self.headline(response.overall_verdict)
         )
         proposed_score_explanation = self._naturalize_user_text(
@@ -201,6 +271,7 @@ class VerificationAIExplanationValidator:
                 (proposed_score_explanation,),
                 score_numbers,
                 source_identity_confirmed,
+                source_official_confirmed,
             )
             else self.score_explanation(score_breakdown)
         )
@@ -208,7 +279,12 @@ class VerificationAIExplanationValidator:
             normalized
             for value in self._stable_unique_text(output.limitations)
             if (normalized := self._naturalize_user_text(value))
-            if self._text_is_safe((normalized,), allowed_numbers, source_identity_confirmed)
+            if self._text_is_safe(
+                (normalized,),
+                allowed_numbers,
+                source_identity_confirmed,
+                source_official_confirmed,
+            )
         ][:12]
         proposed_conclusion = self._naturalize_user_text(output.conclusion)
         conclusion = (
@@ -217,6 +293,7 @@ class VerificationAIExplanationValidator:
                 (proposed_conclusion,),
                 allowed_numbers,
                 source_identity_confirmed,
+                source_official_confirmed,
             )
             and self._conclusion_matches_verdict(
                 proposed_conclusion,
@@ -273,10 +350,22 @@ class VerificationAIExplanationValidator:
             )
         return result
 
+    @classmethod
+    def _fallback_evidence(cls, valid) -> list[ExplainedEvidence]:
+        return [
+            ExplainedEvidence(
+                news_id=item.news_id,
+                source=item.source,
+                quote=item.quote,
+                explanation=cls._evidence_relation_text(item),
+            )
+            for item in valid
+        ][:20]
+
     @staticmethod
     def _evidence_relation_text(item) -> str:
         relation = getattr(item, "stance", None) or getattr(item, "relation", None)
-        source = item.source.strip() or f"news_id={item.news_id}对应来源"
+        source = item.source.strip() or "对应材料来源"
         return {
             "supports": f"{source}的逐字材料与目标主张表述一致，因此构成支持证据。",
             "contradicts": f"{source}的逐字材料与目标主张直接冲突，因此构成反驳证据。",
@@ -292,19 +381,57 @@ class VerificationAIExplanationValidator:
         }
 
     @classmethod
-    def _text_is_safe(cls, values, allowed_numbers, source_identity_confirmed):
+    def _text_is_safe(
+        cls,
+        values,
+        allowed_numbers,
+        source_identity_confirmed,
+        source_official_confirmed=False,
+    ):
         for value in values:
+            if cls._INTERNAL_REPRESENTATION_PATTERN.search(value):
+                return False
             if not cls._number_tokens(value) <= allowed_numbers:
                 return False
             if any(term in value for term in cls._AUTHENTICATION_TERMS):
                 return False
             if any(term in value.casefold() for term in cls._INTERNAL_FIELD_TERMS):
                 return False
+            if cls._describes_optional_provenance_absence(value):
+                return False
             if any(
-                phrase in value for phrase in cls._STRONG_SOURCE_IDENTITY_PHRASES
-            ):
+                phrase in value
+                for phrase in cls._CONFIRMED_SOURCE_IDENTITY_PHRASES
+            ) and not source_identity_confirmed:
+                return False
+            if any(
+                phrase in value
+                for phrase in cls._CONFIRMED_OFFICIAL_SOURCE_PHRASES
+            ) and not source_official_confirmed:
+                return False
+            if any(phrase in value for phrase in cls._UNSUPPORTED_TRUTH_PHRASES):
                 return False
         return True
+
+    @classmethod
+    def _describes_optional_provenance_absence(cls, value: str) -> bool:
+        compact = re.sub(r"\s+", "", value)
+        provenance = "|".join(
+            re.escape(term) for term in cls._OPTIONAL_PROVENANCE_TERMS
+        )
+        direct_absence = "|".join(
+            re.escape(term) for term in cls._DIRECT_ABSENCE_TERMS
+        )
+        suffix_absence = "|".join(
+            re.escape(term) for term in cls._SUFFIX_ABSENCE_TERMS
+        )
+        return bool(
+            re.search(
+                rf"(?:{provenance})(?:信息|字段|数据|覆盖)?(?:为)?(?:{suffix_absence})"
+                rf"|(?:{direct_absence}).{{0,12}}(?:{provenance})",
+                compact,
+            )
+        )
 
     @classmethod
     def _naturalize_user_text(cls, value: str) -> str:
@@ -316,7 +443,31 @@ class VerificationAIExplanationValidator:
                 normalized,
                 flags=re.IGNORECASE,
             )
+        normalized = re.sub(
+            r"[（(]?\s*(?:news|event)[\s_-]*id\s*[:=#：]?\s*[A-Za-z0-9-]+\s*[）)]?",
+            "对应材料",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        normalized = re.sub(
+            r"(?<![A-Za-z0-9])heat(?![A-Za-z0-9])",
+            "热度",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        normalized = re.sub(
+            r"(?<![A-Za-z0-9])sentiment(?![A-Za-z0-9])",
+            "情感倾向",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        normalized = re.sub(
+            r"\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b",
+            "相关信息",
+            normalized,
+        )
         normalized = normalized.replace("（ ）", "").replace("()", "")
+        normalized = re.sub(r"对应材料(?:\s*和\s*对应材料)+", "相关材料", normalized)
         return " ".join(normalized.split())
 
     @staticmethod
@@ -328,13 +479,44 @@ class VerificationAIExplanationValidator:
         return source.status == "verified" and source.domain_match is True
 
     @staticmethod
+    def _source_official_confirmed(response: VerificationResponse) -> bool:
+        assessment = response.credibility_assessment
+        if assessment is None:
+            return False
+        source = assessment.source_assessment
+        return (
+            source.status == "verified"
+            and source.domain_match is True
+            and source.source_category == "官方新闻媒体"
+        )
+
+    @staticmethod
     def _conclusion_matches_verdict(value: str, verdict: str) -> bool:
         normalized = value.strip()
         markers = {
             "supported": ("支持", "一致", "相符"),
             "contradicted": ("反驳", "矛盾", "不一致", "冲突"),
             "conflicting": ("冲突", "说法不一", "支持与反驳"),
-            "insufficient_evidence": ("证据不足", "缺少", "不足以", "无法确认"),
+            "insufficient_evidence": (
+                "证据不足",
+                "缺少",
+                "不足以",
+                "无法确认",
+                "尚待核验",
+                "待交叉核验",
+                "未完成交叉核验",
+                "仅能评估",
+                "不能据此确认",
+                "不能确认",
+                "覆盖部分",
+                "仍待补充",
+                "共同表述",
+                "一致描述",
+                "进一步核实",
+                "仍需",
+                "材料范围",
+                "信息边界",
+            ),
             "not_verifiable": ("不可核验", "无法核验", "不能核验", "无法形成"),
         }[verdict]
         blocked = {
@@ -344,9 +526,10 @@ class VerificationAIExplanationValidator:
             "insufficient_evidence": ("已经证实", "得到多来源支持", "受到多来源反驳"),
             "not_verifiable": ("已经证实", "得到多来源支持", "受到多来源反驳"),
         }[verdict]
-        return any(marker in normalized for marker in markers) and not any(
-            marker in normalized for marker in blocked
-        )
+        has_blocked = any(marker in normalized for marker in blocked)
+        if verdict == "insufficient_evidence":
+            return not has_blocked
+        return any(marker in normalized for marker in markers) and not has_blocked
 
     @staticmethod
     def _number_tokens(value: str) -> set[str]:
@@ -392,7 +575,7 @@ class VerificationAIExplanationValidator:
             "supported": "多来源证据与目标主张一致",
             "contradicted": "多来源证据反驳目标主张",
             "conflicting": "不同来源对目标主张存在冲突",
-            "insufficient_evidence": "现有独立证据不足",
+            "insufficient_evidence": "多篇材料已呈现核心信息与报道差异",
             "not_verifiable": "当前表述暂不可核验",
         }[verdict]
 
@@ -402,7 +585,7 @@ class VerificationAIExplanationValidator:
             "supported": "当前输入中的多来源材料对目标主张表述一致，但这不等于现实事实已经得到永久确认。",
             "contradicted": "当前输入中的多来源材料对目标主张形成反驳，但该结论仍受现有材料范围限制。",
             "conflicting": "当前输入中的支持与反驳材料并存，不能选择其中一种说法作为最终事实。",
-            "insufficient_evidence": "当前缺少足够独立证据形成稳定结论，证据不足不等于文章已经被证明虚假。",
+            "insufficient_evidence": "当前多篇材料已覆盖部分核心信息，以下将重点区分共同表述、各自新增的细节以及值得继续关注的变化。",
             "not_verifiable": "当前没有可确定性比较的事实主张，无法形成事实核验结论。",
         }[verdict]
 
@@ -412,7 +595,7 @@ class VerificationAIExplanationValidator:
             "supported": "该主张在当前输入材料中得到多来源支持。",
             "contradicted": "该主张在当前输入材料中受到多来源反驳。",
             "conflicting": "该主张在当前输入材料中同时存在支持和反驳。",
-            "insufficient_evidence": "该主张缺少足够独立证据，暂不能确认或反驳。",
+            "insufficient_evidence": "该主张已在现有材料中找到相关描述，可据此比较共同信息与细节差异。",
             "not_verifiable": "该表述不属于当前阶段可确定性核验的事实主张。",
         }[claim.verdict]
 

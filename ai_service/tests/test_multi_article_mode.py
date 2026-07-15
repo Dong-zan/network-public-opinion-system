@@ -53,8 +53,9 @@ def test_multi_article_question_includes_all_valid_articles_in_prompt() -> None:
     service.answer(event, "综合当前两篇报道，按照报道发布时间说明已知进展。")
 
     assert provider.prompt is not None
-    assert "news_id: 1001" in provider.prompt.user_prompt
-    assert "news_id: 1002" in provider.prompt.user_prompt
+    assert "材料序号: 材料1" in provider.prompt.user_prompt
+    assert "材料序号: 材料2" in provider.prompt.user_prompt
+    assert "news_id" not in provider.prompt.user_prompt
     assert "现场处置工作正在进行" in provider.prompt.user_prompt
     assert "救援工作已经展开" in provider.prompt.user_prompt
 
@@ -110,8 +111,9 @@ def test_repeated_news_id_syntax_answers_every_requested_article() -> None:
         "请分别说明news_id=1001和news_id=1002各自提供了什么信息，然后总结两篇报道。",
     ).answer
 
-    assert "news_id=1001" in answer
-    assert "news_id=1002" in answer
+    assert "news_id" not in answer
+    assert "现场情况记录" in answer
+    assert "救援工作进展" in answer
     assert "现场处置工作正在进行" in answer
     assert "救援工作已经展开" in answer
 
@@ -129,7 +131,8 @@ def test_multiple_news_id_answer_does_not_return_after_first_article() -> None:
     answer = service.answer(event, "分别说明 news_id=1002 和 news_id=1001").answer
 
     assert answer.count("该文章明确提及") == 2
-    assert answer.index("news_id=1001") < answer.index("news_id=1002")
+    assert answer.index("现场情况记录") < answer.index("救援工作进展")
+    assert "news_id" not in answer
     assert "简短综合" in answer
 
 
@@ -139,10 +142,10 @@ def test_missing_requested_news_id_keeps_existing_article_answer() -> None:
 
     answer = service.answer(event, "分别说明 news_id=1001 和 news_id=9999").answer
 
-    assert "news_id=1001" in answer
+    assert "news_id" not in answer
     assert "现场处置工作正在进行" in answer
-    assert "未找到" in answer
-    assert "news_id=9999" in answer
+    assert "部分用户指定的报道当前未包含" in answer
+    assert "9999" not in answer
 
 
 def test_single_news_id_still_returns_only_target_article() -> None:

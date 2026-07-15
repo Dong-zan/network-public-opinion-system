@@ -1,7 +1,16 @@
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 from app.llm.base import LLMProviderConfigurationError
+
+
+# Resolve the service-local file explicitly so configuration works regardless
+# of the directory from which Uvicorn is launched. Existing process variables
+# remain authoritative (override=False).
+load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
 
 
 def _positive_int(name: str, default: int) -> int:

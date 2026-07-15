@@ -100,7 +100,11 @@ class VerificationDisplayResult(BaseModel):
 
     headline: NonEmptyText
     conclusion: NonEmptyText
+    analysis_mode: Literal["single_article_audit", "cross_source_verification"]
+    evidence_score_applicable: bool
     reasons: list[NonEmptyText] = Field(default_factory=list, max_length=12)
+    analysis_sections: list[ExplanationReason] = Field(default_factory=list, max_length=12)
+    claim_reviews: list[ClaimAIExplanation] = Field(default_factory=list, max_length=10)
     evidence_cards: list[VerificationEvidenceCard] = Field(
         default_factory=list,
         max_length=20,

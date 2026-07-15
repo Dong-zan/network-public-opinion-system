@@ -140,6 +140,8 @@ def test_two_independent_sources_can_support_claim(client, event_payload) -> Non
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["event_id"] == event_payload["event_id"]
+    assert payload["target_news_id"] == 1001
     assert payload["overall_verdict"] == "supported"
     assert payload["claim_results"][0]["independent_source_count"] == 2
     assert {item["news_id"] for item in payload["claim_results"][0]["evidence"]} == {
@@ -388,7 +390,10 @@ def test_score_type_and_range_are_fixed(client, event_payload) -> None:
     payload = response.json()
     assert 0 <= payload["evidence_score"] <= 100
     assert payload["score_type"] == "heuristic_evidence_score"
-    assert any("不代表事实为真的概率" in item for item in payload["limitations"])
+    assert payload["score_explanation"]
+    assert payload["limitations"] == [
+        "本次分析基于当前事件内已输入的新闻材料进行交叉比较。"
+    ]
     assert "启发式证据强度" in payload["score_explanation"]
     assert "真实性概率为" not in payload["score_explanation"]
 

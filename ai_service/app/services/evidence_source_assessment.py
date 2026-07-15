@@ -88,7 +88,7 @@ class EvidenceSourceAssessmentService:
             "witness": "目击者",
             "social_account": "社交账号",
             "anonymous_source": "匿名来源",
-            "unknown": "来源角色未明确",
+            "unknown": "新闻来源",
         }[role]
         present = []
         if article.source.strip():
@@ -99,4 +99,4 @@ class EvidenceSourceAssessmentService:
             present.append("发布时间")
         if present:
             return f"输入中标记为{role_label}，具有{'、'.join(present)}。"
-        return f"输入中标记为{role_label}，当前可用来源元数据较少。"
+        return f"输入中标记为{role_label}。"

@@ -18,7 +18,7 @@
 - 当前调用为非流式、单轮事件问答，默认关闭思考模式。
 - 报告接口在 DeepSeek 模式下要求模型返回 JSON，并通过 Pydantic 校验；结构错误最多安全修复一次。
 - 图表不由大模型生成。完整详情页由前端组合结构化图表数据和 AI 报告文字。
-- 第一阶段核验不调用 Provider、不联网，不使用模型自报置信度；`evidence_score` 是启发式证据评分，不代表事实为真的概率。
+- 第一阶段的事实裁决不调用 Provider、不联网，也不使用模型自报置信度；裁决完成后，可解释展示层最多调用一次当前 Provider 生成用户文案。`evidence_score` 是启发式证据评分，不代表事实为真的概率。
 - 证据图谱在 `AI_EVIDENCE_GRAPH_LLM_ENABLED=true` 且使用 DeepSeek Provider 时最多调用模型一次；转载文章保留图节点，但不会增加独立来源数量，结构比例也不表示真实性概率。
 
 ## 当前不包含
@@ -122,9 +122,11 @@ uvicorn app.main:app --host 127.0.0.1 --port 8005 --env-file .env
 
 `ai_explanation.score_breakdown` 由代码按照当前 `credibility-risk-v1` 权重生成，包含证据、来源和语言风险的权重及贡献。`evidence_score` 是启发式证据强度，`risk_score` 是确定性综合风险分，二者都不是真实性概率。
 
-模型输出必须通过 claim id、news id、来源和逐字 quote 校验。`evidence_source_assessments` 分别评价每篇实际引用证据的来源角色、注册状态、域名匹配和元数据覆盖；输入标记为政务发布不等于来源身份已经验证，只有本地注册表匹配且域名一致时才能使用 `verified` 表述。
+模型输出必须通过 claim id、news id、来源和逐字 quote 校验。`evidence_source_assessments` 分别评价每篇实际引用证据的来源角色、注册状态、域名匹配和元数据覆盖；输入标记为政务发布不等于来源身份已经验证，只有本地注册表匹配且域名一致时才能使用 `verified` 表述。生产 Verify 服务会复用本项目爬虫已配置的人民网、新华网、中新网和新浪新闻名称及域名：前三者可识别为官方新闻媒体，新浪新闻识别为新闻门户；名称相同但域名不符时不会通过来源身份确认。
 
-面向前端的 `display_result` 包含 `headline`、`conclusion`、`reasons`、`evidence_cards` 和 `uncertainties`。每张证据卡片只保留同一来源最相关的一条逐字引用，并补充来源身份说明和该引用为何支持、反驳、关联或更新目标主张；原始 `claim_results` 和证据数组继续保留供审计。超时、连接失败、空响应、非法 JSON、Schema 错误、引用错误或未知异常都不会使 `/ai/verify` 失败；接口仍返回 HTTP 200，并提供证据驱动的 `deterministic_fallback` 解释。测试和离线联调可使用 Fake 或 Stub Provider，不访问真实网络。
+事件仅有一篇新闻时，`overall_verdict` 仍保持 `insufficient_evidence`，因为目标文章不能作为自己的事实证据；但前端主体不再反复展示“独立证据不足”。DeepSeek 会基于已确认的来源类别与可追溯性、正文归因方式、标题和正文一致性、信息完整性以及具体语言风险生成 `headline`、`conclusion`、`reasons` 和主张说明。跨来源事实边界只在 `uncertainties` 中集中说明一次。来源清晰或语言克制可以改善对材料本身的评价，但不能据此把正文事实判定为已经证实；模型不可用时，确定性兜底也会优先展示来源、语言和主张结构，而不是重复同一句证据缺口话术。
+
+面向前端的 `display_result` 包含 `headline`、`conclusion`、`reasons`、`evidence_cards` 和 `uncertainties`。每张证据卡片只保留同一来源最相关的一条逐字引用，并补充来源身份说明和该引用为何支持、反驳、关联或更新目标主张；原始 `claim_results` 和证据数组继续保留供审计。模型返回代码围栏、前后说明、无害额外字段或缺少部分展示字段时，服务会提取合法 JSON、忽略非契约字段，并仅对缺失或不合规的局部内容使用确定性补全；不会因此丢弃其余合规文案。超时、连接失败、空响应、完全无法解析的 JSON、没有任何可用模型文案或未知异常仍不会使 `/ai/verify` 失败；接口返回 HTTP 200，并提供证据驱动的 `deterministic_fallback` 解释。测试和离线联调可使用 Fake 或 Stub Provider，不访问真实网络。
 
 ## /ai/verify 语义校准（仅离线开发）
 
@@ -327,4 +329,4 @@ Content-Type: application/json
 }
 ```
 
-核验响应中的 `overall_verdict` 和每条主张结论使用 `supported`、`contradicted`、`conflicting`、`insufficient_evidence` 或 `not_verifiable`。`score_type` 固定为 `heuristic_evidence_score`。响应还提供可核验主张数、确定结论数、核验覆盖率和评分解释；这些新增字段不改变原有字段。
+核验响应会回传请求事件中的 `event_id` 和实际目标 `target_news_id`。`overall_verdict` 和每条主张结论使用 `supported`、`contradicted`、`conflicting`、`insufficient_evidence` 或 `not_verifiable`。`score_type` 固定为 `heuristic_evidence_score`。响应还提供可核验主张数、确定结论数、核验覆盖率和评分解释；这些新增字段不改变原有字段。

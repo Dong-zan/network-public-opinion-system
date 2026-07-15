@@ -264,7 +264,7 @@ class QAService:
         if explicitly_official:
             sources = []
             for article in explicitly_official:
-                identity = article.source or article.title or f"news_id={article.news_id}"
+                identity = article.source or article.title or "相关报道"
                 if identity not in sources:
                     sources.append(identity)
             return QAResult(
@@ -365,11 +365,7 @@ class QAService:
 
         answer_parts = ["逐篇信息：", *article_sections, f"简短综合：{synthesis}"]
         if missing:
-            answer_parts.append(
-                "当前事件数据中未找到："
-                + "、".join(f"news_id={news_id}" for news_id in missing)
-                + "。"
-            )
+            answer_parts.append("部分用户指定的报道当前未包含在事件材料中。")
         return QAResult(
             answer="\n".join(answer_parts),
             confidence=0.7,
@@ -506,17 +502,17 @@ class QAService:
             return f"“{article.title or '标题未提供'}”提到：{content[:240]}"
         if article.title:
             return f"已知报道标题为“{article.title}”，但正文内容未提供"
-        return f"news_id={article.news_id} 的文章未提供标题和正文"
+        return "该报道未提供标题和正文"
 
     @staticmethod
     def _article_evidence_line(article: Article) -> str:
-        identity_parts = [f"news_id={article.news_id}"]
+        identity_parts = ["相关报道"]
         if article.source:
-            identity_parts.append(f"source={article.source}")
+            identity_parts.append(f"来源为{article.source}")
         if article.title:
-            identity_parts.append(f"title={article.title}")
+            identity_parts.append(f"标题为{article.title}")
         if article.publish_time:
-            identity_parts.append(f"publish_time={article.publish_time}（报道发布时间）")
+            identity_parts.append(f"报道时间为{article.publish_time}")
         identity = "，".join(identity_parts)
         content = " ".join(article.content.split())
         if content:
@@ -533,7 +529,7 @@ class QAService:
         content = " ".join(article.content.split())
         statement = content[:240] if content else "当前文章正文未提供具体内容"
         return (
-            f"- news_id={article.news_id}，{title}，{source}，{publish_time}。"
+            f"- {title}，{source}，{publish_time}。"
             f"该文章明确提及：{statement}"
         )
 
@@ -616,12 +612,50 @@ class QAService:
     def _finalize_result(result: QAResult) -> QAResult:
         answer = result.answer
         answer = re.sub(
+            r"\b(?:articles?|news)\s*\[\s*\d+\s*\]\s*\.\s*",
+            "",
+            answer,
+            flags=re.IGNORECASE,
+        )
+        answer = re.sub(
+            r"\b(?:event|analysis|article|articles)\s*\.\s*",
+            "",
+            answer,
+            flags=re.IGNORECASE,
+        )
+        answer = re.sub(
+            r"[（(]\s*(?:(?:news|article|event)[_\s-]?id)\s*(?:[=:：#]\s*)?"
+            r"(?:\[\s*)?\d+(?:\s*[,，、和及]\s*\d+)*(?:\s*\])?\s*[)）]",
+            "",
+            answer,
+            flags=re.IGNORECASE,
+        )
+        answer = re.sub(
+            r"\b(?:news|article)[_\s-]?id\s*(?:[=:：#]\s*)?"
+            r"(?:\[\s*)?\d+(?:\s*[,，、和及]\s*\d+)*(?:\s*\])?",
+            "相关报道",
+            answer,
+            flags=re.IGNORECASE,
+        )
+        answer = re.sub(
+            r"\bevent[_\s-]?id\s*(?:[=:：#]\s*)?\d+",
+            "当前事件",
+            answer,
+            flags=re.IGNORECASE,
+        )
+        answer = re.sub(
             r"is_official\s*[、,，]\s*account_type\s*[、,，]\s*source_type\s*字段均为空",
             "当前输入未提供足够的来源身份信息",
             answer,
             flags=re.IGNORECASE,
         )
         internal_names = {
+            "news_id": "相关报道",
+            "article_id": "相关报道",
+            "event_id": "当前事件",
+            "publish_time": "报道时间",
+            "update_time_context_only": "上下文更新时间",
+            "update_time": "更新时间",
             "event.summary": "事件摘要",
             "is_official": "来源身份信息",
             "account_type": "来源身份信息",
@@ -631,6 +665,9 @@ class QAService:
             "top_k": "文章筛选数量",
             "PromptBundle": "提示信息",
             "EventContext": "事件上下文",
+            "quoted_news_ids": "引用关系",
+            "duplicate_group_id": "重复内容分组",
+            "reference_urls": "参考链接",
         }
         for internal_name, natural_language in internal_names.items():
             answer = re.sub(re.escape(internal_name), natural_language, answer, flags=re.IGNORECASE)
@@ -643,6 +680,19 @@ class QAService:
         )
         for pattern, replacement_text in overstatements:
             answer = re.sub(pattern, replacement_text, answer)
+        answer = re.sub(
+            r"(?<![A-Za-z0-9])[_A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+(?![A-Za-z0-9])",
+            "相关信息",
+            answer,
+        )
+        answer = re.sub(
+            r"(?:相关报道\s*[、,，]\s*)+相关报道",
+            "多篇相关报道",
+            answer,
+        )
+        answer = re.sub(r"[（(]\s*[)）]", "", answer)
+        answer = re.sub(r"\s+([，。；：！？])", r"\1", answer)
+        answer = re.sub(r"[ \t]{2,}", " ", answer)
         return replace(result, answer=answer)
 
     @staticmethod

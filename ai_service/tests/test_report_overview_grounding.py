@@ -129,10 +129,10 @@ def test_event_17_persons_only_keep_named_natural_persons() -> None:
     assert report.overview.persons == ["周明远"]
 
 
-def test_organization_is_not_a_report_person() -> None:
+def test_organization_is_not_a_report_person_and_grounded_person_is_recovered() -> None:
     report = grounded_report({"overview": {"persons": ["清源新能源有限公司"]}})
 
-    assert report.overview.persons == []
+    assert report.overview.persons == ["周明远"]
 
 
 def test_event_17_limitations_do_not_claim_supported_slots_are_missing() -> None:
@@ -153,11 +153,12 @@ def test_suggestions_are_semantically_deduplicated() -> None:
     assert "事件调查进展" in follow_up[0]
 
 
-def test_cross_day_reporting_activity_includes_dates_and_readable_duration() -> None:
+def test_deepseek_trend_is_preserved_instead_of_replaced_by_reporting_template() -> None:
     report = grounded_report()
 
-    assert "2026年7月12日12:20至7月13日09:10" in report.trend_analysis
-    assert "20小时50分钟" in report.trend_analysis
+    assert "模型文本会由服务端最终化" in report.trend_analysis
+    assert "报道发布于" not in report.trend_analysis
+    assert "不能据此判断舆情升降" in report.trend_analysis
 
 
 def test_unsupported_model_overview_values_are_safely_cleared() -> None:

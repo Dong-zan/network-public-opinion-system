@@ -1,5 +1,6 @@
 from app.llm.base import LLMProvider
 from app.llm.prompt_types import PromptBundle
+from app.llm.prompts import build_qa_prompt
 from app.schemas.event import EventContext
 from app.services.qa_service import QAService
 
@@ -224,3 +225,54 @@ def test_empty_summary_falls_back_to_articles(client, event_payload) -> None:
     answer = response.json()["answer"]
     assert "某地发生事故并开展救援" in answer
     assert "组织救援" in answer
+
+
+def test_provider_answer_hides_raw_database_identifiers(event_payload) -> None:
+    provider = RecordingProvider(
+        "多篇报道（news_id 79, 81, 158）描述了争议；"
+        "event_id=9 的 publish_time 与 update_time_context_only 不同，"
+        "quoted_news_ids 和 duplicate_group_id 仅供内部关联；"
+        "articles[0].news_id=79、news id [81, 158] 与 analysis.risk_level 都是内部表示。"
+    )
+    service = QAService(provider=provider)
+    event = EventContext.model_validate(event_payload)
+
+    result = service.answer(event, "这个事件主要需要关注什么？")
+
+    lowered = result.answer.lower()
+    assert "news_id" not in lowered
+    assert "event_id" not in lowered
+    assert "publish_time" not in lowered
+    assert "update_time" not in lowered
+    assert "quoted_news_ids" not in lowered
+    assert "duplicate_group_id" not in lowered
+    assert "articles[" not in lowered
+    assert "analysis." not in lowered
+    assert "79" not in result.answer
+    assert "81" not in result.answer
+    assert "158" not in result.answer
+    assert "报道" in result.answer
+
+
+def test_qa_prompt_uses_user_visible_material_labels(event_payload) -> None:
+    event = EventContext.model_validate(event_payload)
+
+    prompt = build_qa_prompt(event, "news_id=1001 这篇报道说了什么？", event.articles, 1000)
+
+    assert "news_id" not in prompt.user_prompt.lower()
+    assert "event_id" not in prompt.user_prompt.lower()
+    assert "publish_time" not in prompt.user_prompt.lower()
+    assert "材料1" in prompt.user_prompt
+    assert "报道时间" in prompt.user_prompt
+
+
+def test_missing_requested_articles_do_not_echo_internal_ids(event_payload) -> None:
+    provider = RecordingProvider("现有材料可用于简要比较。")
+    service = QAService(provider=provider)
+    event = EventContext.model_validate(event_payload)
+
+    result = service.answer(event, "请分别说明 news_id=1001、9999")
+
+    assert "news_id" not in result.answer.lower()
+    assert "9999" not in result.answer
+    assert "部分用户指定的报道" in result.answer

@@ -435,10 +435,11 @@ class ReportService:
         features = extract_report_features(event, articles)
         limitations = []
         overview = parsed_report.overview
+        relevant_aspects = set(features.relevant_fact_aspects)
 
         time_decision = self._ground_event_time(overview.time, articles)
         event_time = time_decision.value
-        if event_time is None:
+        if event_time is None and "time" in relevant_aspects:
             limitations.append(
                 "不同材料对事件发生时间的表述存在冲突。"
                 if self._has_time_conflict(articles)
@@ -447,7 +448,7 @@ class ReportService:
 
         location_decision = self._ground_location(overview.location, articles)
         location = location_decision.value
-        if location is None:
+        if location is None and "location" in relevant_aspects:
             limitations.append("当前材料未提供可确认的事件地点。")
 
         persons = self._ground_persons(overview.persons, articles)
@@ -472,15 +473,92 @@ class ReportService:
             "summary": self._sanitize_user_text(overview.summary),
         }
         payload["summary"] = self._sanitize_user_text(parsed_report.summary)
-        payload["trend_analysis"] = self._sanitize_user_text(
-            self._trend_analysis(event, articles)
-        )
-        payload["risk_analysis"] = self._sanitize_user_text(
-            self._risk_analysis(event, articles)
-        )
-        payload["suggestions"] = self._deterministic_suggestions(features)
-        payload["limitations"] = self._finalize_limitations(limitations)
+        if self.provider.name == "fake":
+            payload["trend_analysis"] = self._sanitize_user_text(
+                self._trend_analysis(event, articles)
+            )
+            payload["risk_analysis"] = self._sanitize_user_text(
+                self._risk_analysis(event, articles)
+            )
+            payload["suggestions"] = self._deterministic_suggestions(features)
+            payload["limitations"] = self._finalize_limitations(limitations)
+        else:
+            payload["trend_analysis"] = self._finalize_model_trend(
+                parsed_report.trend_analysis,
+                features,
+                event,
+                articles,
+            )
+            payload["risk_analysis"] = self._finalize_model_risk(
+                parsed_report.risk_analysis,
+                features,
+            )
+            payload["suggestions"] = self._finalize_suggestions(
+                parsed_report.suggestions,
+                features,
+            )
+            payload["limitations"] = self._finalize_limitations(
+                parsed_report.limitations + limitations,
+                features,
+            )
+        payload = self._sanitize_report_natural_language(payload)
         return ReportResponse.model_validate(payload)
+
+    @classmethod
+    def _finalize_model_trend(
+        cls,
+        value: str,
+        features: ReportFeatures,
+        event: EventContext,
+        articles: list[Article],
+    ) -> str:
+        text = cls._filter_irrelevant_report_text(value, features)
+        if len(features.heat_history) < 2:
+            safe_parts = []
+            for part in re.split(r"(?<=[。！？；])", text):
+                normalized = part.strip()
+                if not normalized:
+                    continue
+                claims_trend = any(
+                    marker in normalized
+                    for marker in ("升温", "降温", "热度上升", "热度下降", "传播路径")
+                )
+                states_uncertainty = any(
+                    marker in normalized
+                    for marker in ("无法", "不能", "不足", "缺少", "不等同", "不代表")
+                )
+                if claims_trend and not states_uncertainty:
+                    continue
+                safe_parts.append(normalized)
+            text = "".join(safe_parts)
+            if text and not any(
+                marker in text
+                for marker in ("无法判断", "不能判断", "缺少历史热度", "没有连续热度")
+            ):
+                text += "当前没有连续热度数据，不能据此判断舆情升降。"
+        return text or cls._trend_analysis(event, articles)
+
+    @classmethod
+    def _finalize_model_risk(
+        cls,
+        value: str,
+        features: ReportFeatures,
+    ) -> str:
+        text = cls._filter_irrelevant_report_text(value, features)
+        risk_level = cls._safe_snippet(features.risk_level or "")
+        if not risk_level:
+            return text or "上游分析结果未提供风险等级。"
+
+        level_pattern = re.compile(
+            r"(?:上游分析结果显示当前|模型判断当前|模型判断|当前)?风险等级(?:为|是)"
+            r"[“\"']?(?:低|中|高)[”\"']?"
+        )
+        correct_statement = f"上游分析结果显示当前风险等级为“{risk_level}”"
+        if level_pattern.search(text):
+            text = level_pattern.sub(correct_statement, text)
+        elif correct_statement not in text:
+            text = correct_statement + "。" + text
+        return text
 
     @staticmethod
     def _overview_summary(event: EventContext, articles: list[Article]) -> str:
@@ -492,7 +570,7 @@ class ReportService:
             identity = (
                 ReportService._safe_snippet(article.source)
                 or ReportService._safe_snippet(article.title)
-                or f"news_id={article.news_id}"
+                or "相关报道"
             )
             evidence.append(f"{identity}的文章提到：{snippet[:180]}")
         if evidence:
@@ -685,21 +763,21 @@ class ReportService:
     ) -> list[str]:
         limitations = []
         missing_facts = []
-        if event_time is None:
+        aspects = set(features.relevant_fact_aspects)
+        if event_time is None and "time" in aspects:
             missing_facts.append("事件发生时间")
-        if location is None:
+        if location is None and "location" in aspects:
             missing_facts.append("地点")
-        if "具体涉事人物或机构尚未明确" in features.critical_information_gaps:
-            missing_facts.append("具体涉事人物或机构名称")
         if missing_facts:
             limitations.append(
                 "当前材料未明确" + ReportService._join_chinese_items(missing_facts) + "。"
             )
 
-        limitations.append(
-            f"当前分析基于{features.article_count}篇报道、{features.source_count}个来源，"
-            "报道数量和信息覆盖仍然有限。"
-        )
+        if features.article_count < 2 or features.source_count < 2:
+            limitations.append(
+                f"当前分析基于{features.article_count}篇报道、{features.source_count}个来源，"
+                "报道数量和信息覆盖仍然有限。"
+            )
         gaps = " ".join(features.critical_information_gaps)
         if cause and "最终调查结论" in gaps:
             limitations.append("现有材料已提供初步原因，但最终调查结论尚未正式公布。")
@@ -834,7 +912,10 @@ class ReportService:
                     clause_end_candidates = [position for position in (sentence.find("，", match.end()), sentence.find(",", match.end())) if position >= 0]
                     clause_end = min(clause_end_candidates) if clause_end_candidates else len(sentence)
                     clause = sentence[clause_start:clause_end]
-                    event_markers = ("发生", "事发", "出现", "报警", "停运", "事故")
+                    event_markers = (
+                        "发生", "事发", "出现", "报警", "停运", "事故", "开庭",
+                        "宣判", "发布", "签约", "开幕", "闭幕", "开赛", "结束",
+                    )
                     is_leading_event_time = not sentence[:match.start()].strip(" ，,") and any(
                         marker in sentence[match.end():] for marker in event_markers
                     )
@@ -1099,6 +1180,9 @@ class ReportService:
         patterns = (
             r"(?:负责人|记者|发言人|驾驶员|组织者)\s*(?P<name>[赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳酆鲍史唐费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于傅皮卞齐康伍余元卜顾孟平黄和穆萧尹姚邵湛汪祁毛禹狄米贝明臧计伏成戴谈宋茅庞熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍虞万支柯昝管卢莫经房裘缪干解应宗丁宣邓郁单杭洪包诸左石崔吉龚程邢裴陆荣翁荀羊於惠甄曲封储靳段富巫乌焦巴弓牧隗山谷车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘钭厉戎祖武符刘景詹束龙叶幸司郜黎蓟薄印宿白怀蒲邰从鄂索咸籍赖卓蔺屠蒙池乔阴鬱胥能苍双闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍却璩桑桂濮牛寿通边扈燕冀郏浦尚农温别庄晏柴瞿阎慕连茹习宦艾鱼容向古易慎戈廖庾终居衡步都耿满匡国文寇广禄阙东欧殳沃利蔚越隆师巩聂晁勾敖融冷訾辛阚那简饶空曾毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓公][\u4e00-\u9fff]{1,3})(?=组织|表示|介绍|称|带领|负责|[，。；])",
             r"(?P<name>[赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳酆鲍史唐费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于傅皮卞齐康伍余元卜顾孟平黄和穆萧尹姚邵湛汪祁毛禹狄米贝明臧计伏成戴谈宋茅庞熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍虞万支柯昝管卢莫经房裘缪干解应宗丁宣邓郁单杭洪包诸左石崔吉龚程邢裴陆荣翁荀羊於惠甄曲封储靳段富巫乌焦巴弓牧隗山谷车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘钭厉戎祖武符刘景詹束龙叶幸司郜黎蓟薄印宿白怀蒲邰从鄂索咸籍赖卓蔺屠蒙池乔阴鬱胥能苍双闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍却璩桑桂濮牛寿通边扈燕冀郏浦尚农温别庄晏柴瞿阎慕连茹习宦艾鱼容向古易慎戈廖庾终居衡步都耿满匡国文寇广禄阙东欧殳沃利蔚越隆师巩聂晁勾敖融冷訾辛阚那简饶空曾毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓公][\u4e00-\u9fff]{1,3})(?:组织|带领|表示|介绍|称)",
+            r"(?:队长|主帅|教练|球员|名宿|父亲|母亲|生父|生母|女友|被告|嫌疑人)"
+            r"\s*(?P<name>[\u4e00-\u9fff·]{2,15}?)"
+            r"(?=赛后|回应|表示|坦言|认为|称|指出|质疑|怒喷|因|疑|[，。；：“])",
         )
         for article in articles:
             content = cls._safe_snippet(article.content)
@@ -1113,15 +1197,22 @@ class ReportService:
 
     @classmethod
     def _ground_persons(cls, values: list[str], articles: list[Article]) -> list[str]:
-        supported = set(cls._natural_person_values(articles))
-        return cls._stable_unique([value.strip() for value in values if value.strip() in supported])
+        supported = cls._natural_person_values(articles)
+        contents = cls._usable_contents(articles)
+        grounded_model_values = [
+            value.strip()
+            for value in values
+            if cls._is_natural_person(value.strip())
+            and any(value.strip() in content for content in contents)
+        ]
+        return cls._stable_unique(grounded_model_values + supported)[:8]
 
     @staticmethod
     def _is_natural_person(value: str) -> bool:
         generic_terms = ("相关部门", "有关部门", "有关方面", "工作人员", "相关人员", "当地部门", "负责人", "值班人员", "救援人员")
         organization_suffixes = ("公司", "集团", "委员会", "管理局", "救援支队", "救援队", "中心", "专家组", "医院", "学校", "政府", "部门")
         return (
-            re.fullmatch(r"[赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳酆鲍史唐费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于傅皮卞齐康伍余元卜顾孟平黄和穆萧尹姚邵湛汪祁毛禹狄米贝明臧计伏成戴谈宋茅庞熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍虞万支柯昝管卢莫经房裘缪干解应宗丁宣邓郁单杭洪包诸左石崔吉龚程邢裴陆荣翁荀羊於惠甄曲封储靳段富巫乌焦巴弓牧隗山谷车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘钭厉戎祖武符刘景詹束龙叶幸司郜黎蓟薄印宿白怀蒲邰从鄂索咸籍赖卓蔺屠蒙池乔阴鬱胥能苍双闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍却璩桑桂濮牛寿通边扈燕冀郏浦尚农温别庄晏柴瞿阎慕连茹习宦艾鱼容向古易慎戈廖庾终居衡步都耿满匡国文寇广禄阙东欧殳沃利蔚越隆师巩聂晁勾敖融冷訾辛阚那简饶空曾毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓公][\u4e00-\u9fff]{1,3}", value) is not None
+            re.fullmatch(r"[\u4e00-\u9fff][\u4e00-\u9fff·]{1,14}", value) is not None
             and not any(term in value for term in generic_terms)
             and not value.endswith(organization_suffixes)
         )
@@ -1264,7 +1355,82 @@ class ReportService:
     @staticmethod
     def _sanitize_user_text(value: str) -> str:
         text = value.strip()
+        had_object_wrapper = bool(
+            re.search(
+                r"(?i)\b(?:EventContext|Article|EventAnalysis|Sentiment|"
+                r"ReportResponse|EventOverview|dict)\s*\(",
+                text,
+            )
+        )
+        text = re.sub(
+            r"(?i)\b(?:EventContext|Article|EventAnalysis|Sentiment|"
+            r"ReportResponse|EventOverview|dict)\s*\(",
+            "",
+            text,
+        )
+        text = re.sub(
+            r"(?i)\b(?:articles?|news)\s*\[\s*\d+\s*\]\s*\.\s*",
+            "",
+            text,
+        )
+        text = re.sub(
+            r"(?i)\b(?:event|analysis|article|articles|overview)\s*\.\s*",
+            "",
+            text,
+        )
+        text = re.sub(
+            r"[（(]\s*(?:(?:news|article|event)[_\s-]?id)\s*(?:[=:：#]\s*)?"
+            r"(?:\[\s*)?\d+(?:\s*[,，、和及]\s*\d+)*(?:\s*\])?\s*[)）]",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"(?i)(?<![A-Za-z0-9_])(?:news|article)[_\s-]?id\s*"
+            r"(?:[=:：#]\s*)?(?:\[\s*)?\d+(?:\s*[,，、和及]\s*\d+)*(?:\s*\])?",
+            "相关报道",
+            text,
+        )
+        text = re.sub(
+            r"(?i)(?<![A-Za-z0-9_])event[_\s-]?id\s*(?:[=:：#]\s*)?\d+",
+            "当前事件",
+            text,
+        )
         replacements = (
+            (r"(?i)(?<![A-Za-z0-9_])news_id(?![A-Za-z0-9_])", "相关报道"),
+            (r"(?i)(?<![A-Za-z0-9_])article_id(?![A-Za-z0-9_])", "相关报道"),
+            (r"(?i)(?<![A-Za-z0-9_])event_id(?![A-Za-z0-9_])", "当前事件"),
+            (r"(?i)(?<![A-Za-z0-9_])publish_time(?![A-Za-z0-9_])", "报道时间"),
+            (r"(?i)(?<![A-Za-z0-9_])update_time_context_only(?![A-Za-z0-9_])", "上下文更新时间"),
+            (r"(?i)(?<![A-Za-z0-9_])update_time(?![A-Za-z0-9_])", "更新时间"),
+            (r"(?i)(?<![A-Za-z0-9_])heat_history(?![A-Za-z0-9_])", "历史热度变化"),
+            (r"(?i)(?<![A-Za-z0-9_])sentiment_history_count(?![A-Za-z0-9_])", "情感变化数据"),
+            (r"(?i)(?<![A-Za-z0-9_])dominant_sentiment(?![A-Za-z0-9_])", "主要情感倾向"),
+            (r"(?i)(?<![A-Za-z0-9_])negative_ratio(?![A-Za-z0-9_])", "负面情绪占比"),
+            (r"(?i)(?<![A-Za-z0-9_])risk_level(?![A-Za-z0-9_])", "风险等级"),
+            (r"(?i)(?<![A-Za-z0-9_])keywords(?![A-Za-z0-9_])", "高频议题"),
+            (r"(?i)(?<![A-Za-z0-9_])sentiment(?![A-Za-z0-9_])", "情感倾向"),
+            (r"(?i)(?<![A-Za-z0-9_])heat(?![A-Za-z0-9_])", "热度"),
+            (r"(?i)(?<![A-Za-z0-9_])stage(?![A-Za-z0-9_])", "生命周期阶段"),
+            (r"(?i)(?<![A-Za-z0-9_])article_count(?![A-Za-z0-9_])", "报道数量"),
+            (r"(?i)(?<![A-Za-z0-9_])source_count(?![A-Za-z0-9_])", "来源数量"),
+            (r"(?i)(?<![A-Za-z0-9_])trend_analysis(?![A-Za-z0-9_])", "趋势分析"),
+            (r"(?i)(?<![A-Za-z0-9_])risk_analysis(?![A-Za-z0-9_])", "风险分析"),
+            (r"(?i)(?<![A-Za-z0-9_])quoted_news_ids(?![A-Za-z0-9_])", "引用关系"),
+            (r"(?i)(?<![A-Za-z0-9_])duplicate_group_id(?![A-Za-z0-9_])", "重复内容分组"),
+            (r"(?i)(?<![A-Za-z0-9_])reference_urls(?![A-Za-z0-9_])", "参考链接"),
+            (r"(?i)(?<![A-Za-z0-9_])overview(?![A-Za-z0-9_])", "事件概述"),
+            (r"(?i)(?<![A-Za-z0-9_])summary(?![A-Za-z0-9_])", "总结"),
+            (r"(?i)(?<![A-Za-z0-9_])suggestions(?![A-Za-z0-9_])", "建议"),
+            (r"(?i)(?<![A-Za-z0-9_])limitations(?![A-Za-z0-9_])", "分析边界"),
+            (r"(?i)(?<![A-Za-z0-9_])location(?![A-Za-z0-9_])", "地点"),
+            (r"(?i)(?<![A-Za-z0-9_])cause(?![A-Za-z0-9_])", "原因"),
+            (r"(?i)(?<![A-Za-z0-9_])time(?![A-Za-z0-9_])", "时间"),
+            (r"(?i)(?<![A-Za-z0-9_])title(?![A-Za-z0-9_])", "标题"),
+            (r"(?i)(?<![A-Za-z0-9_])source(?![A-Za-z0-9_])", "来源"),
+            (r"(?i)(?<![A-Za-z0-9_])platform(?![A-Za-z0-9_])", "平台"),
+            (r"(?i)(?<![A-Za-z0-9_])content(?![A-Za-z0-9_])", "正文"),
+            (r"(?i)(?<![A-Za-z0-9_])url(?![A-Za-z0-9_])", "链接"),
             (r"(?i)persons字段为空", "当前材料未明确提及具体涉事人物或机构名称"),
             (r"(?i)persons字段", "涉事人物或机构信息"),
             (r"(?i)selected_articles", "现有报道"),
@@ -1286,10 +1452,95 @@ class ReportService:
         )
         for pattern, replacement in replacements:
             text = re.sub(pattern, replacement, text)
+        text = re.sub(
+            r"(?<![A-Za-z0-9])[_A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+(?![A-Za-z0-9])",
+            "相关信息",
+            text,
+        )
+        text = re.sub(
+            r"[\"']?(热度|情感倾向|主要情感倾向|风险等级|生命周期阶段|高频议题|"
+            r"报道时间|更新时间|上下文更新时间|报道数量|来源数量|原因|地点|时间|标题|"
+            r"来源|平台|正文|链接|相关信息)[\"']?\s*[:=：]\s*",
+            r"\1为",
+            text,
+        )
+        text = re.sub(r"(?i)\b(?:None|null|nan)\b", "未提供", text)
+        text = re.sub(r"(?i)\bTrue\b", "是", text)
+        text = re.sub(r"(?i)\bFalse\b", "否", text)
+        text = text.replace("`", "").replace("{", "").replace("}", "")
+        text = text.replace("[", "").replace("]", "")
+        if had_object_wrapper:
+            text = re.sub(r"\)\s*(?=(?:的|，|。|；|$))", "", text)
+        text = re.sub(r"[（(]\s*[)）]", "", text)
+        text = re.sub(r"(?:相关报道\s*[、,，]\s*)+相关报道", "多篇相关报道", text)
+        text = re.sub(r"\s+([，。；：！？])", r"\1", text)
+        text = re.sub(r"[ \t]{2,}", " ", text)
         return text.strip()
 
     @classmethod
-    def _finalize_suggestions(cls, values: list[str]) -> list[str]:
+    def _sanitize_report_natural_language(cls, payload: dict) -> dict:
+        overview = dict(payload.get("overview") or {})
+        for key in ("time", "location", "cause", "summary"):
+            value = overview.get(key)
+            if isinstance(value, str):
+                overview[key] = cls._sanitize_user_text(value)
+        overview["persons"] = [
+            cls._sanitize_user_text(value)
+            for value in overview.get("persons", [])
+            if isinstance(value, str) and cls._sanitize_user_text(value)
+        ]
+        payload["overview"] = overview
+        for key in ("summary", "trend_analysis", "risk_analysis"):
+            value = payload.get(key)
+            if isinstance(value, str):
+                payload[key] = cls._sanitize_user_text(value)
+        for key in ("suggestions", "limitations"):
+            payload[key] = [
+                cls._sanitize_user_text(value)
+                for value in payload.get(key, [])
+                if isinstance(value, str) and cls._sanitize_user_text(value)
+            ]
+        return payload
+
+    @classmethod
+    def _filter_irrelevant_report_text(
+        cls,
+        value: str,
+        features: ReportFeatures,
+    ) -> str:
+        text = cls._sanitize_user_text(value)
+        aspects = set(features.relevant_fact_aspects)
+        parts = []
+        for part in re.split(r"(?<=[。！？；])", text):
+            normalized = part.strip()
+            if not normalized:
+                continue
+            if "casualty" not in aspects and any(
+                marker in normalized
+                for marker in ("伤亡", "伤者", "受伤", "遇难", "死亡人数")
+            ):
+                continue
+            if "investigation" not in aspects and any(
+                marker in normalized
+                for marker in ("最终调查结论", "事故调查", "救援进展", "搜救进展")
+            ):
+                continue
+            if "location" not in aspects and any(
+                marker in normalized
+                for marker in ("地点", "发生地", "事发地")
+            ):
+                continue
+            if "time" not in aspects and "事件发生时间" in normalized:
+                continue
+            parts.append(normalized)
+        return "".join(parts)
+
+    @classmethod
+    def _finalize_suggestions(
+        cls,
+        values: list[str],
+        features: ReportFeatures | None = None,
+    ) -> list[str]:
         replacements = (
             ("建议相关部门加快调查", "持续跟踪调查进展及可信来源信息。"),
             ("立即通过官方渠道发布", "必要时准备准确统一的回应材料。"),
@@ -1309,26 +1560,45 @@ class ReportService:
                 if marker in normalized:
                     normalized = safe_text
                     break
-            normalized = cls._sanitize_user_text(normalized)
+            normalized = (
+                cls._filter_irrelevant_report_text(normalized, features)
+                if features is not None
+                else cls._sanitize_user_text(normalized)
+            )
             if normalized and normalized not in result:
                 result.append(normalized)
 
         fallbacks = (
-            "持续跟踪调查进展及可信来源信息。",
-            "核验不同来源之间的争议信息。",
-            "监测负面情绪变化，必要时准备准确回应口径。",
+            "对比不同来源对事件核心事实和观点的表述差异。",
+            "关注与当前事件核心议题直接相关的新增信息。",
+            "结合后续报道观察争议焦点和公众情绪是否发生变化。",
         )
         for fallback in fallbacks:
             if len(result) >= 2:
                 break
             if fallback not in result:
                 result.append(fallback)
-        return result[:5]
+        unique = cls._semantic_unique_suggestions(result)
+        for fallback in fallbacks:
+            if len(unique) >= 2:
+                break
+            if fallback not in unique:
+                unique.append(fallback)
+        return unique[:5]
 
     @classmethod
-    def _finalize_limitations(cls, values: list[str]) -> list[str]:
+    def _finalize_limitations(
+        cls,
+        values: list[str],
+        features: ReportFeatures | None = None,
+    ) -> list[str]:
         limitations = cls._stable_unique(
-            [cls._sanitize_user_text(value) for value in values]
+            [
+                cls._filter_irrelevant_report_text(value, features)
+                if features is not None
+                else cls._sanitize_user_text(value)
+                for value in values
+            ]
         )
         result = []
         covered_categories: list[set[str]] = []

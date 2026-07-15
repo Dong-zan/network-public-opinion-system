@@ -34,6 +34,7 @@ class ReportFeatures:
     conflict_topics: tuple[str, ...]
     heat_history: tuple[tuple[datetime, float], ...]
     sentiment_history_count: int
+    relevant_fact_aspects: tuple[str, ...]
 
 
 def extract_report_features(
@@ -104,6 +105,7 @@ def extract_report_features(
     )
 
     contents = [" ".join(article.content.split()) for article in valid_articles]
+    relevant_fact_aspects = tuple(_relevant_fact_aspects(" ".join(contents)))
     return ReportFeatures(
         article_count=len(valid_articles),
         source_count=len({article.source.strip() for article in valid_articles if article.source.strip()}),
@@ -124,10 +126,13 @@ def extract_report_features(
         stage=event.analysis.stage,
         risk_level=event.analysis.risk_level,
         keywords=tuple(_stable_unique(event.analysis.keywords)),
-        critical_information_gaps=tuple(_critical_information_gaps(contents)),
+        critical_information_gaps=tuple(
+            _critical_information_gaps(contents, relevant_fact_aspects)
+        ),
         conflict_topics=tuple(_conflict_topics(contents)),
         heat_history=tuple(_valid_heat_history(event)),
         sentiment_history_count=_valid_sentiment_history_count(event),
+        relevant_fact_aspects=relevant_fact_aspects,
     )
 
 
@@ -148,32 +153,61 @@ def _article_focus(content: str) -> list[str]:
     return result or ["事件进展"]
 
 
-def _critical_information_gaps(contents: list[str]) -> list[str]:
+def _relevant_fact_aspects(text: str) -> list[str]:
+    aspects = []
+    physical_incident_markers = (
+        "事故", "火灾", "爆炸", "坍塌", "泄漏", "故障", "灾害", "地震",
+        "洪水", "救援", "搜救", "报警", "停运", "被困", "失联",
+    )
+    legal_case_markers = (
+        "案件", "案发", "警方", "检察院", "法院", "开庭", "起诉", "被告",
+        "嫌疑人", "违法", "犯罪", "被害", "遇害", "调查记录",
+    )
+    casualty_markers = ("伤亡", "受伤", "死亡", "遇难", "身亡", "致死")
+    investigation_markers = (
+        "调查", "排查", "通报", "结论", "原因尚", "原因仍", "事故原因",
+    )
+
+    physical_incident = any(marker in text for marker in physical_incident_markers)
+    legal_case = any(marker in text for marker in legal_case_markers)
+    if physical_incident or legal_case:
+        aspects.extend(("time", "location", "cause"))
+    if physical_incident or any(marker in text for marker in casualty_markers):
+        aspects.append("casualty")
+    if physical_incident or legal_case or any(
+        marker in text for marker in investigation_markers
+    ):
+        aspects.append("investigation")
+    return _stable_unique(aspects)
+
+
+def _critical_information_gaps(
+    contents: list[str],
+    relevant_fact_aspects: tuple[str, ...],
+) -> list[str]:
     text = " ".join(contents)
     gaps = []
-    if any(marker in text for marker in ("原因仍在调查", "具体原因仍在调查", "具体原因仍在进一步调查", "原因尚在调查")):
-        gaps.append("事件原因仍待调查")
-    elif not any(marker in text for marker in ("原因是", "由于", "因", "初步排查显示", "初步原因", "有关")):
-        gaps.append("事件原因尚未说明")
+    aspects = set(relevant_fact_aspects)
+    if "cause" in aspects:
+        if any(marker in text for marker in ("原因仍在调查", "具体原因仍在调查", "具体原因仍在进一步调查", "原因尚在调查")):
+            gaps.append("事件原因仍待调查")
+        elif not any(marker in text for marker in ("原因是", "由于", "因", "初步排查显示", "初步原因", "有关")):
+            gaps.append("事件原因尚未说明")
 
     location_pattern = r"(?:事发于|发生在|位于|发生地点为|事故地点为|事发地点为|事故地点是|事发地是|地点位于)\s*[\u4e00-\u9fff]{2,32}(?:省|市|区|县|镇|村|路|街道|机场|车站|学校|医院|产业园|园区|电站)"
-    if not re.search(location_pattern, text):
+    if "location" in aspects and not re.search(location_pattern, text):
         gaps.append("事件地点尚未明确")
 
-    if not any(marker in text for marker in ("伤亡", "受伤", "死亡", "遇难")):
+    if "casualty" in aspects and not any(
+        marker in text for marker in ("伤亡", "受伤", "死亡", "遇难", "身亡", "致死")
+    ):
         gaps.append("伤亡情况尚未明确")
 
-    if any(marker in text for marker in ("尚无最终调查结论", "暂无最终调查结论", "最终调查结论尚未")):
-        gaps.append("最终调查结论尚未形成")
-    elif "最终调查结论" not in text and "调查结论" not in text:
-        gaps.append("最终调查结论尚未提供")
-
-    person_patterns = (
-        r"(?:负责人|记者|发言人|驾驶员|组织者)\s*[\u4e00-\u9fff]{2,4}(?=组织|表示|介绍|称|带领|负责|[，。；])",
-        r"[\u4e00-\u9fff]{2,4}(?:组织|带领|表示|介绍|称|负责)",
-    )
-    if not any(re.search(pattern, text) for pattern in person_patterns):
-        gaps.append("具体涉事人物或机构尚未明确")
+    if "investigation" in aspects:
+        if any(marker in text for marker in ("尚无最终调查结论", "暂无最终调查结论", "最终调查结论尚未")):
+            gaps.append("最终调查结论尚未形成")
+        elif "最终调查结论" not in text and "调查结论" not in text:
+            gaps.append("最终调查结论尚未提供")
     return _stable_unique(gaps)
 
 

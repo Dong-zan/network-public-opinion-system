@@ -2,12 +2,23 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 import json
 
+from pydantic import ValidationError
+
 
 from backend_app.models.event import Event
 from backend_app.models.article import Article
 from backend_app.models.analysis import Analysis
 from backend_app.models.ai_result import AIResult
-from backend_app.services.ai_provider import RealAIProvider
+from backend_app.schemas.ai import AIVerifyResult
+from backend_app.services.ai_provider import AIProviderError, RealAIProvider
+
+
+class AIResourceNotFoundError(RuntimeError):
+    status_code = 404
+
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(message)
 
 
 
@@ -50,7 +61,7 @@ class AIService:
 
         if not event:
 
-            raise Exception(
+            raise AIResourceNotFoundError(
                 f"event {event_id} not found"
             )
 
@@ -170,26 +181,6 @@ class AIService:
 
         ) / analysis_count
 
-
-
-
-        sentiment_score = (
-
-            positive * 0.3
-
-            +
-
-            neutral * 0.3
-
-            +
-
-            negative * 0.4
-
-        )
-
-
-
-
         return {
 
 
@@ -218,7 +209,9 @@ class AIService:
 
                     str(
                         event.update_time
-                    ),
+                    )
+                    if event.update_time
+                    else None,
 
 
 
@@ -272,7 +265,47 @@ class AIService:
 
                         "platform":
 
-                            article.platform or ""
+                            article.platform or "",
+
+
+
+                        "author":
+
+                            article.author or None,
+
+
+
+                        "account_type":
+
+                            article.account_type or None,
+
+
+
+                        "is_official":
+
+                            article.is_official,
+
+
+
+                        "reference_urls":
+
+                            article.reference_urls
+                            if isinstance(article.reference_urls, list)
+                            else [],
+
+
+
+                        "quoted_news_ids":
+
+                            article.quoted_news_ids
+                            if isinstance(article.quoted_news_ids, list)
+                            else [],
+
+
+
+                        "duplicate_group_id":
+
+                            article.duplicate_group_id or None
 
                     }
 
@@ -319,15 +352,6 @@ class AIService:
 
                             round(
                                 negative,
-                                4
-                            ),
-
-
-
-                        "score":
-
-                            round(
-                                sentiment_score,
                                 4
                             )
 
@@ -464,7 +488,11 @@ class AIService:
 
 
 
-        return result
+        return self._normalize_verify_result(
+            result,
+            event_id=event_id,
+            news_id=news_id,
+        )
 
     # =====================================================
     # 保存真实性结果
@@ -521,6 +549,18 @@ class AIService:
         ai.authenticity = result
 
 
+        ai.generated_at = datetime.now()
+
+
+        ai.provider = "real_ai"
+
+
+        ai.status = "success"
+
+
+        ai.error_message = None
+
+
 
         self.db.commit()
 
@@ -536,7 +576,52 @@ class AIService:
         )
 
 
-        return ai
+        return result
+
+    @staticmethod
+    def _normalize_verify_result(
+        result,
+        *,
+        event_id: int,
+        news_id: int,
+    ) -> dict:
+        if not isinstance(result, dict):
+            raise AIProviderError(
+                503,
+                "AI service returned an incompatible verification response",
+            )
+
+        payload = dict(result)
+        upstream_event_id = payload.get("event_id")
+        if upstream_event_id is not None and str(upstream_event_id) != str(event_id):
+            raise AIProviderError(
+                503,
+                "AI service returned a mismatched event_id",
+            )
+        upstream_target_news_id = payload.get("target_news_id")
+        if (
+            upstream_target_news_id is not None
+            and str(upstream_target_news_id) != str(news_id)
+        ):
+            raise AIProviderError(
+                503,
+                "AI service returned a mismatched target_news_id",
+            )
+
+        # event_id/news_id are trusted routing identifiers already known by the
+        # backend.  Adding them here keeps the frontend contract stable while
+        # remaining compatible with an older AI process during a rolling restart.
+        payload["event_id"] = event_id
+        payload["news_id"] = news_id
+
+        try:
+            validated = AIVerifyResult.model_validate(payload)
+        except ValidationError as exc:
+            raise AIProviderError(
+                503,
+                "AI service returned an incompatible verification response",
+            ) from exc
+        return validated.model_dump(mode="json")
 
 
 

@@ -256,7 +256,7 @@ def test_context_evidence_returns_valid_updates_quote_without_scoring_it() -> No
     assert result.evidence_score == 0
 
 
-def test_context_evidence_returns_valid_related_quote_without_scoring_it() -> None:
+def test_context_evidence_returns_valid_related_quote_with_limited_score() -> None:
     response = verify(
         "事故造成3人受伤。",
         "网传事故造成3人受伤。",
@@ -266,7 +266,7 @@ def test_context_evidence_returns_valid_related_quote_without_scoring_it() -> No
     assert result.context_evidence[0].relation == "related"
     assert result.context_evidence[0].quote == "网传事故造成3人受伤。"
     assert result.independent_source_count == 0
-    assert result.evidence_score == 0
+    assert 0 < result.evidence_score <= 55
 
 
 def test_truncated_duplicate_candidate_is_reported_even_when_not_selected() -> None:

@@ -47,3 +47,50 @@ class StaticSourceRegistry(SourceRegistry):
 
 
 InMemorySourceRegistry = StaticSourceRegistry
+
+
+def project_source_registry() -> StaticSourceRegistry:
+    """Return the local identities for sources collected by this project.
+
+    The registry is deliberately small and static.  A name match alone is not
+    enough: ``SourceTraceabilityEvaluator`` also requires the article hostname
+    to match one of the configured domains before treating the identity as
+    verified.
+    """
+
+    return StaticSourceRegistry(
+        (
+            SourceProfile(
+                canonical_name="人民网",
+                aliases=("people",),
+                verified_domains=("people.com.cn",),
+                source_category="官方新闻媒体",
+                ownership_type="中央媒体",
+                registry_version="project-crawler-sources-v1",
+            ),
+            SourceProfile(
+                canonical_name="新华网",
+                aliases=("xinhua",),
+                verified_domains=("news.cn",),
+                source_category="官方新闻媒体",
+                ownership_type="中央媒体",
+                registry_version="project-crawler-sources-v1",
+            ),
+            SourceProfile(
+                canonical_name="中新网",
+                aliases=("中国新闻网", "chinanews"),
+                verified_domains=("chinanews.com.cn",),
+                source_category="官方新闻媒体",
+                ownership_type="中央媒体",
+                registry_version="project-crawler-sources-v1",
+            ),
+            SourceProfile(
+                canonical_name="新浪新闻",
+                aliases=("sina",),
+                verified_domains=("sina.com.cn",),
+                source_category="新闻门户",
+                ownership_type="商业媒体平台",
+                registry_version="project-crawler-sources-v1",
+            ),
+        )
+    )

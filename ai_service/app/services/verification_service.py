@@ -18,6 +18,8 @@ from app.services.evidence_validator import EvidenceValidator
 from app.services.evidence_source_assessment import EvidenceSourceAssessmentService
 from app.services.verification_scorer import VerificationScorer
 from app.services.source_clusterer import SourceClusterer, SourceDescriptor
+from app.services.source_registry import project_source_registry
+from app.services.source_traceability import SourceTraceabilityEvaluator
 from app.services.verification_display import VerificationDisplayBuilder
 from app.services.verification_explanation import VerificationExplanationService
 
@@ -142,6 +144,7 @@ class VerificationService:
             sentence_limit_applied=sentence_limit_applied,
         )
         response = VerificationResponse(
+            event_id=event.event_id,
             target_news_id=target.news_id if target.news_id is not None else target_news_id,
             overall_verdict=overall_verdict,
             evidence_score=evidence_score,
@@ -257,7 +260,21 @@ class VerificationService:
             target.news_id if target.news_id is not None else "",
         )
         support_sources, contradict_sources = self._stance_clusters(evidence)
-        verdict = self._claim_verdict(support_sources, contradict_sources, evidence)
+        related_material_count = len(
+            {
+                str(item.news_id)
+                for item in context_evidence
+                if item.relation == "related"
+                and item.reason_code == "unstructured_claim_not_deterministically_comparable"
+                and (item.relevance_score or 0) >= 0.7
+            }
+        )
+        verdict = self._claim_verdict(
+            support_sources,
+            contradict_sources,
+            evidence,
+            related_material_count=related_material_count,
+        )
         limitations = []
         if any(item.stance == "related" for item in retrieval.evidence):
             limitations.append(
@@ -267,9 +284,6 @@ class VerificationService:
             limitations.append(
                 "较晚报道可能反映信息或状态演化，不作为对较早主张的直接支持或反驳。"
             )
-        if verdict == "insufficient_evidence":
-            limitations.append("独立来源证据不足，当前不能形成稳定核验结论。")
-
         provisional = ClaimVerificationResult(
             claim_id=claim_id,
             claim=claim.text,
@@ -278,7 +292,13 @@ class VerificationService:
             evidence=evidence,
             context_evidence=context_evidence,
             limitations=self._stable_unique(limitations),
-            explanation=self._claim_explanation(claim, verdict, support_sources, contradict_sources),
+            explanation=self._claim_explanation(
+                claim,
+                verdict,
+                support_sources,
+                contradict_sources,
+                related_material_count=related_material_count,
+            ),
         )
         result = provisional.model_copy(
             update={"evidence_score": self.scorer.score_claim(provisional)}
@@ -295,6 +315,8 @@ class VerificationService:
         support_sources: set[str],
         contradict_sources: set[str],
         evidence: list[VerificationEvidence],
+        *,
+        related_material_count: int = 0,
     ) -> VerificationVerdict:
         if support_sources and contradict_sources:
             return "conflicting"
@@ -302,6 +324,8 @@ class VerificationService:
             return "supported"
         if len(contradict_sources) >= 2:
             return "contradicted"
+        if not evidence and related_material_count >= 2:
+            return "supported"
         if evidence:
             return "insufficient_evidence"
         return "insufficient_evidence"
@@ -328,9 +352,15 @@ class VerificationService:
         verdict: VerificationVerdict,
         support_sources: set[str],
         contradict_sources: set[str],
+        *,
+        related_material_count: int = 0,
     ) -> str:
         type_name = VerificationService._claim_type_name(claim.claim_type)
         if verdict == "supported":
+            if not support_sources and related_material_count >= 2:
+                return (
+                    f"{related_material_count}篇不同材料对该{type_name}主张给出了高度一致的表述。"
+                )
             return f"{len(support_sources)}个独立来源对该{type_name}主张给出了相同表述。"
         if verdict == "contradicted":
             return f"{len(contradict_sources)}个独立来源给出了与目标{type_name}主张直接冲突的表述。"
@@ -338,7 +368,7 @@ class VerificationService:
             return "当前独立来源同时包含支持与反驳该主张的结构化证据。"
         if verdict == "not_verifiable":
             return "该表述不属于当前阶段可确定性核验的事实主张。"
-        return "当前独立来源数量或可比较事实槽位不足，无法形成稳定结论。"
+        return "现有材料已提供相关信息，可结合共同表述、信息增量和来源关系继续分析。"
 
     @staticmethod
     def _score_explanation(
@@ -426,20 +456,13 @@ class VerificationService:
         article_truncated: bool,
         sentence_limit_applied: bool,
     ) -> list[str]:
-        limitations = [
-            "第一阶段仅核验当前事件输入中的文章，不联网搜索外部信息。",
-            "证据强度评分表示当前核验结论的启发式证据强度，不代表事实为真的概率。",
-        ]
-        if candidate_count == 0:
-            limitations.append("当前没有可作为独立证据的候选文章。")
+        limitations = ["本次分析基于当前事件内已输入的新闻材料进行交叉比较。"]
         if duplicate_count:
             limitations.append("同编号、同URL、相同正文或正文高度重复的转载已去重。")
         if near_duplicate_fact_difference_count:
             limitations.append("部分高相似报道包含不同关键事实，已保留用于识别潜在冲突。")
         if evolving_information:
             limitations.append("部分较晚报道可能反映信息演化，未作为对较早报道的直接反驳。")
-        if any(item.verdict == "insufficient_evidence" for item in results):
-            limitations.append("部分主张缺少至少两个独立来源的一致证据。")
         if not results or all(item.verdict == "not_verifiable" for item in results):
             limitations.append("目标文章中未提取到当前阶段可确定性核验的事实主张。")
         if candidate_limit_applied:
@@ -488,7 +511,10 @@ class VerificationService:
 
 @lru_cache
 def get_verification_service() -> VerificationService:
-    assessment_service = CredibilityAssessmentService()
+    source_evaluator = SourceTraceabilityEvaluator(project_source_registry())
+    assessment_service = CredibilityAssessmentService(
+        source_evaluator=source_evaluator
+    )
     explanation_service = None
     provider = None
     if settings.verify_semantic_enabled or settings.verify_explanation_enabled:
@@ -499,6 +525,7 @@ def get_verification_service() -> VerificationService:
         from app.services.semantic_credibility import LlmSemanticCredibilityAnalyzer
 
         assessment_service = CredibilityAssessmentService(
+            source_evaluator=source_evaluator,
             semantic_analyzer=LlmSemanticCredibilityAnalyzer(
                 provider,
                 article_max_chars=settings.verify_semantic_article_max_chars,

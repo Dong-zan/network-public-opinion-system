@@ -1,5 +1,9 @@
 from copy import deepcopy
 
+from app.services.verification_explanation_validator import (
+    VerificationAIExplanationValidator,
+)
+
 
 def article(news_id, content: str, source: str, url: str) -> dict:
     return {
@@ -99,3 +103,74 @@ def test_duplicate_news_id_is_rejected_with_422(client, event_payload) -> None:
 
     assert response.status_code == 422
     assert "news_id必须唯一" in response.text
+
+
+def test_related_multi_article_material_has_nonzero_score_and_concise_display(
+    client,
+    event_payload,
+) -> None:
+    response = post_verify(
+        client,
+        event_payload,
+        [
+            article(
+                1,
+                "逐玉衍生演唱会于8月15日在深圳举行，已公布部分参演阵容。",
+                "极目新闻",
+                "https://one.example/concert",
+            ),
+            article(
+                79,
+                "逐玉演唱会定档8月15日深圳，公开阵容包括李怀安、俞浅浅等艺人。",
+                "中国蓝新闻",
+                "https://two.example/concert",
+            ),
+            article(
+                158,
+                "演唱会将于8月15日在深圳举行，报道同时讨论男女主缺席阵容。",
+                "都市现场",
+                "https://three.example/concert",
+            ),
+        ],
+    )
+
+    payload = response.json()
+    assert payload["evidence_score"] > 0
+    display = payload["display_result"]
+    assert display["uncertainties"] == [
+        "本次共比较3篇事件材料，重点呈现共同信息、报道差异与来源关系；结论对应当前材料范围。"
+    ]
+    assert len(display["reasons"]) <= 5
+    visible = " ".join(
+        [display["headline"], display["conclusion"], *display["reasons"]]
+        + display["uncertainties"]
+        + [item["explanation"] for item in display["evidence_cards"]]
+    )
+    for forbidden in (
+        "news_id",
+        "event_id",
+        "heat",
+        "sentiment",
+        "independent_source_count",
+    ):
+        assert forbidden not in visible
+    assert visible.count("证据不足") <= 1
+    assert visible.count("无法核验") <= 1
+
+
+def test_verify_text_filter_naturalizes_raw_field_names_and_rejects_object_repr() -> None:
+    validator = VerificationAIExplanationValidator()
+    text = validator._naturalize_user_text(
+        "报道（news_id 79）对应event_id=3，heat为27，sentiment偏正面。"
+    )
+
+    assert "news_id" not in text
+    assert "event_id" not in text
+    assert "heat" not in text
+    assert "sentiment" not in text
+    assert validator._INTERNAL_REPRESENTATION_PATTERN.search(
+        "Article(news_id=79, source='媒体')"
+    )
+    assert validator._INTERNAL_REPRESENTATION_PATTERN.search(
+        "{'news_id': 79, 'source': '媒体'}"
+    )
