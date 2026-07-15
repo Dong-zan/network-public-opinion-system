@@ -206,9 +206,18 @@ function App() {
       setLoading(true)
       setError('')
       try {
-        const detail = await fetchEventDetail(selectedEventId)
+        const [detail, eventNews] = await Promise.all([
+          fetchEventDetail(selectedEventId),
+          fetchEventNews(selectedEventId),
+        ])
         const latestReport = await fetchLatestAiReport(detail.id)
-        const mergedDetail = mergeEventDisplayData(detail, latestReport)
+        const mergedDetail = mergeEventDisplayData(
+          {
+            ...detail,
+            newsList: eventNews,
+          },
+          latestReport,
+        )
         if (cancelled) {
           return
         }

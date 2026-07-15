@@ -218,6 +218,33 @@ def test_fallback_names_sources_and_quotes(items, verdict, sources) -> None:
     assert all(item.quote for item in evidence)
 
 
+def test_fallback_limits_claim_explanation_evidence_to_twenty() -> None:
+    context = event(supported_items())
+    baseline = VerificationService().verify(context, 1)
+    claim = baseline.claim_results[0]
+    evidence = [
+        claim.evidence[0].model_copy(update={"news_id": news_id})
+        for news_id in range(2, 41)
+    ]
+    oversized_claim = claim.model_copy(
+        update={"evidence": evidence, "context_evidence": []}
+    )
+    oversized_response = baseline.model_copy(
+        update={"claim_results": [oversized_claim]}
+    )
+
+    explanation = VerificationExplanationService(
+        StubProvider(output="not-json")
+    ).explain(context, context.articles[0], oversized_response)
+
+    assert len(oversized_claim.evidence) == 39
+    assert len(explanation.claim_explanations[0].evidence) == 20
+    assert [item.news_id for item in explanation.claim_explanations[0].evidence] == list(
+        range(2, 22)
+    )
+    assert explanation.why[0].evidence_refs == list(range(2, 22))
+
+
 def test_conflicting_explanation_preserves_support_and_contradiction() -> None:
     provider = StubProvider(error=ConnectionError())
 

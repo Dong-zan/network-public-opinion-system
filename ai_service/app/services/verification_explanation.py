@@ -341,7 +341,7 @@ class VerificationExplanationService:
             claim=claim.claim,
             conclusion=self.validator.claim_conclusion(claim),
             explanation=explanation,
-            evidence=evidence,
+            evidence=evidence[:20],
         )
 
     def _fallback_reason(self, claim: ClaimVerificationResult) -> ExplanationReason:
@@ -353,7 +353,7 @@ class VerificationExplanationService:
             title=f"主张{claim.claim_id}的证据关系",
             explanation=self._fallback_claim(claim).explanation,
             claim_ids=[claim.claim_id],
-            evidence_refs=refs,
+            evidence_refs=refs[:20],
         )
 
     @staticmethod

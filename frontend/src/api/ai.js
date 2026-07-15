@@ -68,18 +68,36 @@ export async function fetchAiReport(eventId) {
 }
 
 export async function verifyNews(payload) {
+  const eventId = Number(payload.event_id)
+  const newsId = Number(payload.news_id)
+  const maxClaims = Number(payload.max_claims ?? 5)
+
+  if (!Number.isInteger(eventId) || eventId <= 0) {
+    throw new Error('event_id 必须是有效正整数')
+  }
+
+  if (!Number.isInteger(newsId) || newsId <= 0) {
+    throw new Error('news_id 必须是有效正整数')
+  }
+
+  const requestPayload = {
+    event_id: eventId,
+    news_id: newsId,
+    max_claims: maxClaims,
+  }
+
   if (USE_MOCK) {
     await wait(400)
     return {
-      event_id: Number(payload.event_id),
-      news_id: Number(payload.news_id),
+      event_id: eventId,
+      news_id: newsId,
       display_result: buildMockVerifyDisplayResult(),
     }
   }
 
   const response = await request('/api/ai/verify', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify(requestPayload),
   })
 
   return response?.data ?? response
