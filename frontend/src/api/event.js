@@ -58,7 +58,11 @@ function normalizeEventShape(item = {}) {
 
   return {
     id: String(item.event_id ?? item.id ?? ''),
-    title: item.title ?? '未命名事件',
+    eventName: normalizeMaybeEmptyText(item.event_name ?? item.eventName) ?? '',
+    title:
+      normalizeMaybeEmptyText(item.event_name ?? item.eventName) ??
+      normalizeMaybeEmptyText(item.title) ??
+      '未命名事件',
     heat: Number(item.heat ?? item.heat_score) || 0,
     riskLevel: item.risk_level ?? item.riskLevel ?? '未知',
     lifecycle: item.stage ?? item.lifecycle ?? '未知',
@@ -155,7 +159,18 @@ function normalizeTimeline(timeline) {
       '后端暂未返回时间线内容'
     const source = normalizeMaybeEmptyText(item.source)
 
-    return [time, content, source ? `来源：${source}` : ''].filter(Boolean).join(' · ')
+    return {
+      newsId: item.news_id ?? item.newsId ?? null,
+      time,
+      content,
+      source: source ?? '',
+      text: [time, content, source ? `来源：${source}` : ''].filter(Boolean).join(' · '),
+      heat: item.heat ?? item.heat_score ?? item.popularity ?? null,
+      isOfficial: item.is_official === true || item.isOfficial === true,
+      repostCount: item.repost_count ?? item.repostCount ?? 0,
+      commentCount: item.comment_count ?? item.commentCount ?? 0,
+      likeCount: item.like_count ?? item.likeCount ?? 0,
+    }
   })
 }
 
@@ -379,6 +394,11 @@ function normalizeNewsItem(item, index = 0) {
       normalizeMaybeEmptyText(item.summary) ??
       normalizeMaybeEmptyText(item.snippet) ??
       '',
+    heat:
+      item.heat === null && item.heat_score === null
+        ? null
+        : Number(item.heat ?? item.heat_score) || 0,
+    isOfficial: item.is_official === true || item.isOfficial === true,
   }
 }
 

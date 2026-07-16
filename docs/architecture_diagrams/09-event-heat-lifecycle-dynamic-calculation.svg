@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="t3 d3">
+  <title id="t3">事件热度与生命周期动态计算</title><desc id="d3">事件文章的数量、近期增长、新闻热度和情感指标进入热度计算，结果写入 event_heat_history，再依据热度时间序列决定萌芽、成长、高潮或衰退阶段。</desc>
+  <defs><marker id="a3" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto"><path d="M0 0l11 5.5L0 11z" fill="#2d6f9f"/></marker><style>.title{font:700 38px 'Microsoft YaHei',sans-serif;fill:#20262b}.sub{font:400 18px 'Microsoft YaHei',sans-serif;fill:#687078}.cap{font:700 17px 'Microsoft YaHei',sans-serif;fill:#2d6f9f;letter-spacing:1px;text-anchor:middle}.h{font:700 22px 'Microsoft YaHei',sans-serif;fill:#252b30;text-anchor:middle}.b{font:400 15px 'Microsoft YaHei',sans-serif;fill:#596168;text-anchor:middle}.m{font:600 14px Consolas,'Microsoft YaHei',sans-serif;fill:#30383e;text-anchor:middle}.shape{fill:#fff;stroke:#59646c;stroke-width:2}.accent{fill:#edf5fa;stroke:#2d6f9f;stroke-width:2.5}.flow{fill:none;stroke:#2d6f9f;stroke-width:4;marker-end:url(#a3)}.thin{fill:none;stroke:#87949d;stroke-width:1.5}.dash{fill:none;stroke:#87949d;stroke-width:1.5;stroke-dasharray:6 5}.small{font:500 13px 'Microsoft YaHei',sans-serif;fill:#4d5961;text-anchor:middle}.axis{font:400 13px 'Microsoft YaHei',sans-serif;fill:#666f76}</style></defs>
+  <rect width="1600" height="900" fill="#fafbfc"/><text x="70" y="72" class="title">事件热度与生命周期动态计算</text><text x="70" y="105" class="sub">Temporal heat aggregation and lifecycle state decision</text><line x1="70" y1="132" x2="1530" y2="132" stroke="#aab2b8" stroke-width="1.5"/>
+  <text x="180" y="190" class="cap">EVENT ARTICLES</text><text x="535" y="190" class="cap">HEAT CALCULATION</text><text x="880" y="190" class="cap">HISTORY</text><text x="1220" y="190" class="cap">LIFECYCLE DECISION</text>
+
+  <g transform="translate(75 270)"><path d="M0 0h210v390H0z" class="shape"/><text x="105" y="42" class="h">Event articles</text><line x1="20" y1="60" x2="190" y2="60" class="thin"/>
+    <g transform="translate(28 88)"><path d="M0 0h154v52H0zM0 75h154v52H0zM0 150h154v52H0zM0 225h154v52H0z" fill="#f3f4f5" stroke="#8d969c"/><path d="M12 15h110M12 31h88M12 90h120M12 106h76M12 165h105M12 181h96M12 240h125M12 256h82" stroke="#68737a" stroke-width="3"/></g>
+  </g><path d="M285 465h82" class="flow"/>
+
+  <g transform="translate(390 265)"><path d="M0 0h290v400H0z" class="accent"/><text x="145" y="43" class="h">Heat calculation</text><line x1="25" y1="61" x2="265" y2="61" class="thin"/>
+    <path d="M38 94h214v48H38zM38 158h214v48H38zM38 222h214v48H38zM38 286h214v48H38z" fill="#fff" stroke="#828d94"/>
+    <text x="145" y="124" class="m">article volume</text><text x="145" y="188" class="m">recent growth</text><text x="145" y="252" class="m">news heat</text><text x="145" y="316" class="m">sentiment</text>
+    <text x="145" y="372" class="m">H(t) = weighted metrics</text>
+  </g><path d="M680 465h83" class="flow"/>
+
+  <g transform="translate(785 265)"><path d="M0 0h270v400H0z" class="shape"/><text x="135" y="43" class="h">event_heat_history</text><line x1="24" y1="61" x2="246" y2="61" class="thin"/>
+    <line x1="40" y1="315" x2="235" y2="315" class="thin"/><line x1="40" y1="95" x2="40" y2="315" class="thin"/>
+    <path d="M40 286L72 274L104 247L136 188L168 126L200 154L235 230" fill="none" stroke="#2d6f9f" stroke-width="4"/>
+    <path d="M40 286L72 274L104 247L136 188L168 126L200 154L235 230L235 315H40Z" fill="#2d6f9f" fill-opacity=".10"/>
+    <g fill="#2d6f9f"><circle cx="40" cy="286" r="5"/><circle cx="72" cy="274" r="5"/><circle cx="104" cy="247" r="5"/><circle cx="136" cy="188" r="5"/><circle cx="168" cy="126" r="5"/><circle cx="200" cy="154" r="5"/><circle cx="235" cy="230" r="5"/></g>
+    <text x="28" y="103" class="axis">heat</text><text x="215" y="339" class="axis">time</text><text x="135" y="374" class="m">heat · created_at · stage</text>
+  </g><path d="M1055 465h78" class="flow"/>
+
+  <g transform="translate(1155 265)"><path d="M0 0h365v400H0z" class="shape"/><text x="182" y="43" class="h">Lifecycle decision</text><line x1="24" y1="61" x2="341" y2="61" class="thin"/>
+    <line x1="40" y1="290" x2="330" y2="290" class="thin"/><line x1="40" y1="90" x2="40" y2="290" class="thin"/>
+    <path d="M40 276C90 270 105 235 135 215C165 195 185 113 220 108C260 103 276 166 300 210C315 237 322 258 330 274" fill="none" stroke="#2d6f9f" stroke-width="5"/>
+    <line x1="105" y1="92" x2="105" y2="310" class="dash"/><line x1="185" y1="92" x2="185" y2="310" class="dash"/><line x1="275" y1="92" x2="275" y2="310" class="dash"/>
+    <text x="72" y="335" class="small">萌芽期</text><text x="145" y="335" class="small">成长期</text><text x="230" y="335" class="small">高潮期</text><text x="307" y="335" class="small">衰退期</text>
+    <text x="182" y="372" class="axis" text-anchor="middle">基于热度水平、增速与近期趋势动态判定</text>
+  </g>
+
+  <path d="M180 660v100h1090" fill="none" stroke="#8d979d" stroke-width="2" stroke-dasharray="8 6" marker-end="url(#a3)"/><text x="690" y="790" class="b">新文章持续进入后，热度历史追加记录，生命周期状态随时间动态更新</text>
+  <text x="70" y="870" class="sub">输出阶段：萌芽期 / 成长期 / 高潮期 / 衰退期</text>
+</svg>

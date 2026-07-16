@@ -8,6 +8,7 @@ import re
 import sys
 import logging
 from datetime import datetime
+from typing import Optional
 
 from crawler.config import LOG_LEVEL, LOG_FORMAT, LOG_DATE_FORMAT
 
@@ -92,6 +93,24 @@ def parse_datetime(text: str) -> str:
             except ValueError:
                 continue
     return ""
+
+
+def normalize_publish_time(value) -> Optional[str]:
+    """将发布时间规范为MySQL DATETIME可接受的字符串，非法值返回None。"""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed_datetime = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return parsed_datetime.strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        parsed = parse_datetime(text)
+        return parsed or None
 
 
 # ============================================================

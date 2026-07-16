@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="t2 d2">
+  <title id="t2">事件聚合与 Event ID 生成机制</title><desc id="d2">Article 经文本向量化、余弦相似度候选召回、事件指纹匹配和规则约束决策后，加入已有事件或创建新事件。</desc>
+  <defs><marker id="a2" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto"><path d="M0 0l11 5.5L0 11z" fill="#2d6f9f"/></marker><style>.title{font:700 38px 'Microsoft YaHei',sans-serif;fill:#20262b}.sub{font:400 18px 'Microsoft YaHei',sans-serif;fill:#687078}.cap{font:700 17px 'Microsoft YaHei',sans-serif;fill:#2d6f9f;letter-spacing:1px;text-anchor:middle}.h{font:700 22px 'Microsoft YaHei',sans-serif;fill:#252b30;text-anchor:middle}.b{font:400 15px 'Microsoft YaHei',sans-serif;fill:#596168;text-anchor:middle}.m{font:600 14px Consolas,'Microsoft YaHei',sans-serif;fill:#30383e;text-anchor:middle}.shape{fill:#fff;stroke:#59646c;stroke-width:2}.accent{fill:#edf5fa;stroke:#2d6f9f;stroke-width:2.5}.flow{fill:none;stroke:#2d6f9f;stroke-width:4;marker-end:url(#a2)}.thin{fill:none;stroke:#87949d;stroke-width:1.5}.dash{fill:none;stroke:#87949d;stroke-width:1.5;stroke-dasharray:6 5}.small{font:500 13px 'Microsoft YaHei',sans-serif;fill:#4d5961;text-anchor:middle}</style></defs>
+  <rect width="1600" height="900" fill="#fafbfc"/><text x="70" y="72" class="title">事件聚合与 Event ID 生成机制</text><text x="70" y="105" class="sub">Embedding retrieval and fingerprint-constrained event assignment</text><line x1="70" y1="132" x2="1530" y2="132" stroke="#aab2b8" stroke-width="1.5"/>
+  <text x="155" y="190" class="cap">ARTICLE INPUT</text><text x="410" y="190" class="cap">EMBEDDING</text><text x="685" y="190" class="cap">CANDIDATE RETRIEVAL</text><text x="965" y="190" class="cap">FINGERPRINT MATCHING</text><text x="1240" y="190" class="cap">DECISION</text>
+
+  <path d="M72 280h160l42 42v300H72z" class="shape"/><path d="M232 280v42h42" class="accent"/><path d="M105 370h130M105 405h100M105 440h118" stroke="#657078" stroke-width="4"/><text x="173" y="515" class="h">Article</text><text x="173" y="550" class="b">title · content</text><text x="173" y="579" class="b">source · time</text>
+  <path d="M274 450h70" class="flow"/>
+
+  <path d="M345 275h145v110H345z" fill="#2d6f9f"/><text x="418" y="318" style="font:700 16px Consolas;fill:#fff;text-anchor:middle">text2vec</text><text x="418" y="348" style="font:500 14px Consolas;fill:#fff;text-anchor:middle">base-chinese</text>
+  <path d="M418 385v55" class="flow"/>
+  <g transform="translate(352 462)"><path d="M0 0h132v132H0z" class="accent"/><g fill="#2d6f9f"><circle cx="24" cy="25" r="6" opacity=".35"/><circle cx="52" cy="25" r="6"/><circle cx="80" cy="25" r="6" opacity=".55"/><circle cx="108" cy="25" r="6" opacity=".75"/><circle cx="24" cy="55" r="6"/><circle cx="52" cy="55" r="6" opacity=".35"/><circle cx="80" cy="55" r="6" opacity=".8"/><circle cx="108" cy="55" r="6" opacity=".45"/><circle cx="24" cy="85" r="6" opacity=".55"/><circle cx="52" cy="85" r="6" opacity=".8"/><circle cx="80" cy="85" r="6" opacity=".3"/><circle cx="108" cy="85" r="6"/><circle cx="24" cy="113" r="6" opacity=".7"/><circle cx="52" cy="113" r="6" opacity=".4"/><circle cx="80" cy="113" r="6"/><circle cx="108" cy="113" r="6" opacity=".55"/></g></g>
+  <text x="418" y="625" class="h">768 维向量</text><path d="M484 525h72" class="flow"/>
+
+  <circle cx="580" cy="525" r="25" fill="#2d6f9f"/><text x="580" y="531" style="font:700 16px Consolas;fill:#fff;text-anchor:middle">q</text>
+  <path d="M605 512l65-105M605 520l65-35M605 530l65 35M605 538l65 105" class="thin"/>
+  <g><ellipse cx="725" cy="400" rx="66" ry="28" class="accent"/><text x="725" y="398" class="m">event_a</text><text x="725" y="418" class="small">cos 0.91</text><ellipse cx="725" cy="480" rx="66" ry="28" class="shape"/><text x="725" y="478" class="m">event_b</text><text x="725" y="498" class="small">cos 0.86</text><ellipse cx="725" cy="560" rx="66" ry="28" class="shape"/><text x="725" y="558" class="m">event_c</text><text x="725" y="578" class="small">cos 0.81</text><ellipse cx="725" cy="640" rx="66" ry="28" class="shape"/><text x="725" y="638" class="m">event_n</text><text x="725" y="658" class="small">cos 0.63</text></g>
+  <text x="685" y="705" class="h">Cosine Similarity</text><path d="M791 525h64" class="flow"/>
+
+  <g transform="translate(930 520)"><circle r="125" class="shape"/><circle r="82" fill="none" stroke="#a0aab1"/><path d="M0-110L105-34L65 89L-65 89L-105-34Z" fill="none" stroke="#7d8991"/><path d="M0 0V-110M0 0L105-34M0 0L65 89M0 0L-65 89M0 0L-105-34" class="thin"/><path d="M0-91L78-25L51 70L-47 65L-82-27Z" fill="#2d6f9f" fill-opacity=".14" stroke="#2d6f9f" stroke-width="3"/><text x="0" y="-140" class="small">entity</text><text x="140" y="-28" class="small">action</text><text x="92" y="122" class="small">topic</text><text x="-92" y="122" class="small">hashtag</text></g>
+  <text x="930" y="705" class="h">Event Fingerprint</text><path d="M1055 525h60" class="flow"/>
+
+  <g transform="translate(1230 420)"><circle r="82" class="accent"/><text x="0" y="-12" class="h">Similarity</text><text x="0" y="19" class="h">Score</text><text x="0" y="50" class="m">+ rule constraints</text></g>
+  <path d="M1230 502v55" class="flow"/>
+  <polygon points="1230,557 1320,625 1230,693 1140,625" class="shape"/><text x="1230" y="614" class="h">Threshold</text><text x="1230" y="642" class="b">conflict check</text>
+
+  <path d="M1320 625h80v-155h58" class="flow"/><text x="1350" y="605" class="small">match</text><path d="M1230 693v80h228" class="flow"/><text x="1250" y="754" class="small">no match</text>
+  <path d="M1458 405h95v130h-95z" class="accent"/><text x="1505" y="455" class="h">existing</text><text x="1505" y="486" class="m">event_id</text><path d="M1458 708h95v130h-95z" class="shape"/><text x="1505" y="758" class="h">new</text><text x="1505" y="789" class="m">event_id</text>
+  <text x="70" y="870" class="sub">语义向量用于召回；事件指纹与规则约束用于确认“是否为同一事件”。</text>
+</svg>

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test": "node --test tests/boardFilter.test.js tests/eventKeywords.test.js tests/eventLifecycle.test.js tests/newsContent.test.js tests/textClean.test.js tests/timelineSelection.test.js tests/verifyPresentation.test.js",
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview"

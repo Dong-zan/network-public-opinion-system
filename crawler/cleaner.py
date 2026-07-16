@@ -5,7 +5,7 @@
 
 清洗流程：
   原始 HTML content ──► BeautifulSoup.get_text() ──► 去空白 ──► 去噪声行 ──► 纯文本
-  原始 publish_time  ──► parse_datetime() ──► YYYY-MM-DD HH:MM:SS
+  原始 publish_time  ──► normalize_publish_time() ──► YYYY-MM-DD HH:MM:SS / None
 
 去重逻辑：
   URL 精确匹配 → 判为重复（不再使用内容哈希，保留不同来源的相似内容）
@@ -22,7 +22,7 @@ from bs4 import BeautifulSoup
 from crawler.config import DEDUP_FILE
 from crawler.utils import (
     setup_logger,
-    parse_datetime,
+    normalize_publish_time,
     remove_noise_lines,
 )
 
@@ -97,13 +97,7 @@ def clean_article(article: dict) -> dict | None:
     text = clean_text(text)
 
     # --- 清洗发布时间 ---
-    publish_time = article.get("publish_time", "")
-
-    # 如果上游 crawler 没有解析，则尝试解析为标准格式
-    if publish_time:
-        parsed_time = parse_datetime(publish_time)
-        if parsed_time:
-            publish_time = parsed_time
+    publish_time = normalize_publish_time(article.get("publish_time"))
 
     title = article.get("title", "")
 
@@ -115,17 +109,13 @@ def clean_article(article: dict) -> dict | None:
     if not title.strip():
         return None
 
-    # 规则 2: publish_time 不能为空
-    if not publish_time:
-        return None
-
-    # 规则 3: 正文不能太短
+    # 规则 2: 正文不能太短
     # 微博阈值 30 字（过滤纯表情/无意义帖）；新闻网站至少 50 字
     min_len = 30 if article.get("source") == "微博" else 50
     if len(text.strip()) < min_len:
         return None
 
-    # 规则 4: 过滤专题/栏目页（"更多+" 出现超过 3 次说明是列表页）
+    # 规则 3: 过滤专题/栏目页（"更多+" 出现超过 3 次说明是列表页）
     if text.count("更多+") > 3:
         return None
 

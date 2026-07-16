@@ -94,6 +94,9 @@ class NewsRouteTests(unittest.TestCase):
                     heat_score=76.0,
                     risk_level="中",
                     stage="发酵期",
+                    positive=0.42,
+                    neutral=0.20,
+                    negative=0.38,
                 ),
             ]
         )
@@ -123,6 +126,14 @@ class NewsRouteTests(unittest.TestCase):
         self.assertEqual(analyzed["heat"], 76.0)
         self.assertEqual(analyzed["risk_level"], "中")
         self.assertEqual(analyzed["stage"], "发酵期")
+        self.assertEqual(
+            analyzed["sentiment_distribution"],
+            {
+                "positive": 0.42,
+                "neutral": 0.20,
+                "negative": 0.38,
+            },
+        )
 
     def test_get_news_falls_back_to_content_summary(self):
         response = self.client.get("/api/news")
@@ -139,6 +150,7 @@ class NewsRouteTests(unittest.TestCase):
         self.assertIsNone(pending["heat"])
         self.assertIsNone(pending["risk_level"])
         self.assertIsNone(pending["stage"])
+        self.assertIsNone(pending["sentiment_distribution"])
 
     def test_openapi_contains_news_route_and_response_fields(self):
         openapi = self.app.openapi()
@@ -161,6 +173,7 @@ class NewsRouteTests(unittest.TestCase):
                 "risk_level",
                 "stage",
                 "platform",
+                "sentiment_distribution",
             },
         )
 
@@ -185,8 +198,22 @@ class NewsRouteTests(unittest.TestCase):
                 "summary",
                 "content",
                 "url",
+                "sentiment_distribution",
             },
         )
+        news_by_id = {
+            item["news_id"]: item
+            for item in body["data"]
+        }
+        self.assertEqual(
+            news_by_id[1001]["sentiment_distribution"],
+            {
+                "positive": 0.42,
+                "neutral": 0.20,
+                "negative": 0.38,
+            },
+        )
+        self.assertIsNone(news_by_id[1002]["sentiment_distribution"])
 
     def test_get_event_news_returns_404_for_unknown_event(self):
         response = self.client.get("/api/events/999/news")

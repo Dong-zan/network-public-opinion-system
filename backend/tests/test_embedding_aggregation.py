@@ -238,7 +238,7 @@ class EmbeddingAggregationTests(unittest.TestCase):
         self.assertEqual(db.query(Event).count(), 1)
         db.close()
 
-    def test_event_older_than_fourteen_days_is_not_matched(self):
+    def test_event_older_than_thirty_days_is_not_matched(self):
         db = self.Session()
         embedding = [1.0] + [0.0] * 767
         first_article = Article(title="#世界杯半决赛# 首篇", content="首篇")
@@ -263,7 +263,7 @@ class EmbeddingAggregationTests(unittest.TestCase):
 
         service = AggregationService(db)
         first_event = service.aggregate_article(first_article.news_id)
-        old_time = datetime.now() - timedelta(days=14, minutes=1)
+        old_time = datetime.now() - timedelta(days=30, minutes=1)
         first_event.create_time = old_time
         first_event.update_time = old_time
         db.commit()
@@ -456,7 +456,7 @@ class EmbeddingAggregationTests(unittest.TestCase):
         self.assertNotEqual(ai_event.event_id, celebrity_event.event_id)
         db.close()
 
-    def test_similarity_below_point_eighty_five_creates_new_event(self):
+    def test_weak_topic_fingerprint_with_embedding_can_merge(self):
         db = self.Session()
         first_embedding = [1.0] + [0.0] * 767
         second_embedding = [0.84, sqrt(1 - 0.84 ** 2)] + [0.0] * 766
@@ -484,8 +484,8 @@ class EmbeddingAggregationTests(unittest.TestCase):
         first_event = service.aggregate_article(first_article.news_id)
         second_event = service.aggregate_article(second_article.news_id)
 
-        self.assertNotEqual(first_event.event_id, second_event.event_id)
-        self.assertEqual(db.query(Event).count(), 2)
+        self.assertEqual(first_event.event_id, second_event.event_id)
+        self.assertEqual(db.query(Event).count(), 1)
         db.close()
 
     def test_world_cup_reports_merge_with_multi_signal_score(self):
@@ -599,7 +599,7 @@ class EmbeddingAggregationTests(unittest.TestCase):
         self.assertEqual(db.query(Event).count(), 2)
         db.close()
 
-    def test_score_three_without_event_boundary_does_not_merge(self):
+    def test_score_three_with_weak_fingerprint_can_merge(self):
         db = self.Session()
         first_news = Article(title="甲方公布阶段进展", content="首篇报道")
         second_news = Article(title="后续消息确认相关安排", content="跟进报道")
@@ -625,8 +625,8 @@ class EmbeddingAggregationTests(unittest.TestCase):
         first_event = service.aggregate_article(first_news.news_id)
         second_event = service.aggregate_article(second_news.news_id)
 
-        self.assertNotEqual(first_event.event_id, second_event.event_id)
-        self.assertEqual(db.query(Event).count(), 2)
+        self.assertEqual(first_event.event_id, second_event.event_id)
+        self.assertEqual(db.query(Event).count(), 1)
         db.close()
 
     def test_high_title_overlap_contributes_one_point(self):
@@ -701,6 +701,54 @@ class EmbeddingAggregationTests(unittest.TestCase):
         self.assertEqual(first_event.event_id, bridge_event.event_id)
         self.assertEqual(first_event.event_id, drifting_event.event_id)
         self.assertEqual(db.query(Event).count(), 1)
+        db.close()
+
+    def test_one_off_fingerprint_does_not_cause_chain_drift(self):
+        db = self.Session()
+        topic_articles = [
+            Article(title="核心事件首篇", content="首篇"),
+            Article(title="核心事件后续", content="后续"),
+            Article(title="核心事件进展", content="进展"),
+        ]
+        unrelated = Article(title="桥接词对应的另一件事", content="无关事件")
+        db.add_all(topic_articles + [unrelated])
+        db.flush()
+        db.add_all(
+            [
+                Analysis(
+                    news_id=topic_articles[0].news_id,
+                    embedding=[1.0] + [0.0] * 767,
+                    keywords=["核心事件", "桥接词"],
+                ),
+                Analysis(
+                    news_id=topic_articles[1].news_id,
+                    embedding=[0.85, sqrt(1 - 0.85 ** 2)] + [0.0] * 766,
+                    keywords=["核心事件", "后续信息"],
+                ),
+                Analysis(
+                    news_id=topic_articles[2].news_id,
+                    embedding=[0.84, sqrt(1 - 0.84 ** 2)] + [0.0] * 766,
+                    keywords=["核心事件", "最新进展"],
+                ),
+                Analysis(
+                    news_id=unrelated.news_id,
+                    embedding=[0.90, sqrt(1 - 0.90 ** 2)] + [0.0] * 766,
+                    keywords=["桥接词", "另一件事"],
+                ),
+            ]
+        )
+        db.commit()
+
+        service = AggregationService(db)
+        topic_events = [
+            service.aggregate_article(article.news_id)
+            for article in topic_articles
+        ]
+        unrelated_event = service.aggregate_article(unrelated.news_id)
+
+        self.assertEqual(len({event.event_id for event in topic_events}), 1)
+        self.assertNotEqual(topic_events[0].event_id, unrelated_event.event_id)
+        self.assertEqual(db.query(Event).count(), 2)
         db.close()
 
     def test_england_argentina_weibo_variants_merge(self):
@@ -1145,7 +1193,7 @@ class EmbeddingAggregationTests(unittest.TestCase):
         self.assertEqual(db.query(Event).count(), 1)
         db.close()
 
-    def test_apple_ai_function_and_apple_sales_remain_separate(self):
+    def test_apple_ai_function_and_apple_sales_are_not_hard_isolated(self):
         db = self.Session()
         feature_news = Article(
             title="苹果AI功能将在国行iPhone落地",
@@ -1177,8 +1225,246 @@ class EmbeddingAggregationTests(unittest.TestCase):
         feature_event = service.aggregate_article(feature_news.news_id)
         sales_event = service.aggregate_article(sales_news.news_id)
 
-        self.assertNotEqual(feature_event.event_id, sales_event.event_id)
+        self.assertEqual(feature_event.event_id, sales_event.event_id)
+        self.assertEqual(db.query(Event).count(), 1)
+        db.close()
+
+    def test_apple_ai_function_and_apple_ai_policy_remain_separate(self):
+        db = self.Session()
+        feature_news = Article(
+            title="苹果AI功能将在国行iPhone落地",
+            content="Apple Intelligence功能进入测试。",
+        )
+        policy_news = Article(
+            title="苹果AI政策面临新的合规要求",
+            content="监管机构公布苹果人工智能功能监管要求。",
+        )
+        db.add_all([feature_news, policy_news])
+        db.flush()
+        db.add_all(
+            [
+                Analysis(
+                    news_id=feature_news.news_id,
+                    embedding=[1.0] + [0.0] * 767,
+                    keywords=["苹果", "AI功能", "iPhone"],
+                ),
+                Analysis(
+                    news_id=policy_news.news_id,
+                    embedding=[0.92, sqrt(1 - 0.92 ** 2)] + [0.0] * 766,
+                    keywords=["苹果", "AI政策", "合规要求"],
+                ),
+            ]
+        )
+        db.commit()
+
+        service = AggregationService(db)
+        feature_event = service.aggregate_article(feature_news.news_id)
+        policy_event = service.aggregate_article(policy_news.news_id)
+
+        self.assertNotEqual(feature_event.event_id, policy_event.event_id)
         self.assertEqual(db.query(Event).count(), 2)
+        db.close()
+
+    def test_same_event_lifecycle_stages_merge_by_open_domain_fingerprint(self):
+        db = self.Session()
+        now = datetime.now()
+        articles = [
+            Article(
+                title="美国攻击伊朗军事设施",
+                content="美国对伊朗目标发动攻击。",
+                publish_time=now - timedelta(days=6),
+            ),
+            Article(
+                title="伊朗回应称将采取反制措施",
+                content="伊朗方面回应此前攻击。",
+                publish_time=now - timedelta(days=4),
+            ),
+            Article(
+                title="伊朗公布袭击伤亡情况",
+                content="有关部门公布人员伤亡数字。",
+                publish_time=now - timedelta(days=2),
+            ),
+            Article(
+                title="国际社会关注伊朗局势后续影响",
+                content="多国就相关局势作出反应。",
+                publish_time=now,
+            ),
+        ]
+        db.add_all(articles)
+        db.flush()
+        embeddings = [
+            [1.0, 0.0, 0.0, 0.0] + [0.0] * 764,
+            [0.62, sqrt(1 - 0.62 ** 2), 0.0, 0.0] + [0.0] * 764,
+            [0.45, 0.0, sqrt(1 - 0.45 ** 2), 0.0] + [0.0] * 764,
+            [0.40, 0.0, 0.0, sqrt(1 - 0.40 ** 2)] + [0.0] * 764,
+        ]
+        keywords = [
+            ["美国", "伊朗", "军事设施", "攻击"],
+            ["伊朗", "反制措施", "回应"],
+            ["伊朗", "袭击", "伤亡"],
+            ["伊朗", "国际社会", "局势", "反应"],
+        ]
+        db.add_all(
+            [
+                Analysis(
+                    news_id=article.news_id,
+                    embedding=embedding,
+                    keywords=article_keywords,
+                )
+                for article, embedding, article_keywords in zip(
+                    articles,
+                    embeddings,
+                    keywords,
+                )
+            ]
+        )
+        db.commit()
+
+        service = AggregationService(db)
+        events = [service.aggregate_article(article.news_id) for article in articles]
+
+        self.assertEqual(len({event.event_id for event in events}), 1)
+        self.assertEqual(db.query(Event).count(), 1)
+        self.assertEqual(events[-1].embedding_count, 4)
+        db.close()
+
+    def test_generic_fingerprint_terms_do_not_bridge_unrelated_events(self):
+        db = self.Session()
+        articles = [
+            Article(title="国行iPhone迎来满血Apple智能功能"),
+            Article(title="Apple智能功能正式在国内落地"),
+            Article(title="年轻时熬夜第二天也能满血复活"),
+            Article(title="物质科学智能研发工厂落地上海"),
+        ]
+        db.add_all(articles)
+        db.flush()
+        keywords = [
+            ["iPhone", "Apple智能", "满血"],
+            ["Apple", "智能", "国内落地"],
+            ["Apple", "满血", "熬夜", "身体"],
+            ["智能", "研发工厂", "物质科学"],
+        ]
+        db.add_all(
+            Analysis(
+                news_id=article.news_id,
+                embedding=[0.92, sqrt(1 - 0.92 ** 2)] + [0.0] * 766,
+                keywords=article_keywords,
+            )
+            for article, article_keywords in zip(articles, keywords)
+        )
+        db.commit()
+
+        service = AggregationService(db)
+        events = [service.aggregate_article(article.news_id) for article in articles]
+
+        self.assertEqual(events[0].event_id, events[1].event_id)
+        self.assertNotEqual(events[0].event_id, events[2].event_id)
+        self.assertNotEqual(events[0].event_id, events[3].event_id)
+        db.close()
+
+    def test_person_name_alone_does_not_merge_different_actions(self):
+        db = self.Session()
+        articles = [
+            Article(title="白鹿新剧开到荼蘼即将开机"),
+            Article(title="白鹿主演复仇剧开到荼蘼佛山开机"),
+            Article(title="白鹿新剧开机现场曝光"),
+            Article(title="白鹿综艺舞台妆容引发争议"),
+        ]
+        db.add_all(articles)
+        db.flush()
+        keywords = [
+            ["白鹿", "新剧", "开到荼蘼", "开机"],
+            ["白鹿", "复仇剧", "开到荼蘼", "开机"],
+            ["白鹿", "新剧", "开机现场"],
+            ["白鹿", "综艺", "舞台妆容", "争议"],
+        ]
+        db.add_all(
+            Analysis(
+                news_id=article.news_id,
+                embedding=[0.90, sqrt(1 - 0.90 ** 2)] + [0.0] * 766,
+                keywords=article_keywords,
+            )
+            for article, article_keywords in zip(articles, keywords)
+        )
+        db.commit()
+
+        service = AggregationService(db)
+        events = [service.aggregate_article(article.news_id) for article in articles]
+
+        self.assertEqual(len({event.event_id for event in events[:3]}), 1)
+        self.assertNotEqual(events[0].event_id, events[3].event_id)
+        db.close()
+
+    def test_same_hashtag_without_body_event_consistency_does_not_merge(self):
+        db = self.Session()
+        first = Article(title="#暑假出租屋生活# 弟弟妹妹来家里打地铺")
+        hijack = Article(title="#暑假出租屋生活# 出租房消防安全知识宣传")
+        db.add_all([first, hijack])
+        db.flush()
+        db.add_all(
+            [
+                Analysis(
+                    news_id=first.news_id,
+                    embedding=[1.0] + [0.0] * 767,
+                    keywords=["出租屋", "弟弟妹妹", "暑假"],
+                ),
+                Analysis(
+                    news_id=hijack.news_id,
+                    embedding=[0.82, sqrt(1 - 0.82 ** 2)] + [0.0] * 766,
+                    keywords=["出租房", "消防安全", "火灾"],
+                ),
+            ]
+        )
+        db.commit()
+
+        service = AggregationService(db)
+        first_event = service.aggregate_article(first.news_id)
+        hijack_event = service.aggregate_article(hijack.news_id)
+
+        self.assertNotEqual(first_event.event_id, hijack_event.event_id)
+        db.close()
+
+    def test_mature_event_rejects_centroid_only_member_drift(self):
+        db = self.Session()
+        core_articles = [
+            Article(title=f"NFC果汁无水果调查进展{index}")
+            for index in range(3)
+        ]
+        unrelated = Article(title="小区车库墙体坍塌官方整改")
+        db.add_all(core_articles + [unrelated])
+        db.flush()
+        core_embeddings = [
+            [1.0, 0.0, 0.0] + [0.0] * 765,
+            [0.98, 0.199, 0.0] + [0.0] * 765,
+            [0.98, -0.199, 0.0] + [0.0] * 765,
+        ]
+        db.add_all(
+            [
+                Analysis(
+                    news_id=article.news_id,
+                    embedding=embedding,
+                    keywords=["NFC果汁", "水果", "调查"],
+                )
+                for article, embedding in zip(core_articles, core_embeddings)
+            ]
+            + [
+                Analysis(
+                    news_id=unrelated.news_id,
+                    embedding=[0.70, 0.0, sqrt(1 - 0.70 ** 2)] + [0.0] * 765,
+                    keywords=["整改", "官方", "坍塌"],
+                )
+            ]
+        )
+        db.commit()
+
+        service = AggregationService(db)
+        core_events = [
+            service.aggregate_article(article.news_id) for article in core_articles
+        ]
+        unrelated_event = service.aggregate_article(unrelated.news_id)
+
+        self.assertEqual(len({event.event_id for event in core_events}), 1)
+        self.assertNotEqual(core_events[0].event_id, unrelated_event.event_id)
         db.close()
 
     def test_simulated_one_hundred_weibo_posts_reduce_event_fragmentation(self):

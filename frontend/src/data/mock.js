@@ -6,8 +6,9 @@
 ]
 
 export const defaultProfile = {
-  keywords: ['人工智能', '网络安全'],
-  platforms: ['新闻网站', '微博'],
+  keywords: [],
+  platforms: [],
+  filterEnabled: false,
 }
 
 export const mockEvents = [

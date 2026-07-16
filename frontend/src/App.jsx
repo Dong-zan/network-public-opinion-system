@@ -1,11 +1,24 @@
 ﻿import { useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { useRef } from 'react'
+import { useCallback, useRef } from 'react'
 import { askEventQuestion, fetchAiReport, fetchVerifyResult, generateAiReport, verifyNews } from './api/ai.js'
 import { fetchEventDetail, fetchEvents } from './api/event.js'
 import { fetchEventNews, fetchNewsList } from './api/news.js'
 import { loadSavedUserProfile, loginUser, registerUser, saveUserProfile } from './api/user.js'
 import { defaultProfile, navItems } from './data/mock.js'
+import { filterBoardContent } from './utils/boardFilter.js'
+import { DEFAULT_KEYWORD_LIMIT, prepareEventKeywords } from './utils/eventKeywords.js'
+import { inheritEventLifecycle } from './utils/eventLifecycle.js'
+import { buildNewsContentPresentation } from './utils/newsContent.js'
+import { cleanSummary, cleanTitle } from './utils/textClean.js'
+import { getTimelineNodeText, selectKeyTimelineNodes } from './utils/timelineSelection.js'
+import {
+  aggregateEvidenceSources,
+  buildAuthenticityPresentation,
+  normalizeSourceStatistics,
+  normalizeVerifyMetric,
+  toPublicOpinionText,
+} from './utils/verifyPresentation.js'
 
 const brandName = 'Double Think'
 const brandNameZh = '大堡杏'
@@ -139,57 +152,47 @@ function App() {
       : `最后更新：${formatDisplayDateTime(sidebarCurrentItem?.updatedAt) || '--'}`
   const sidebarCurrentActionLabel = qaTargetType === 'news' ? '查看当前新闻' : '查看事件详情'
 
+  const refreshHomeData = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const [eventResult, newsResult] = await Promise.allSettled([
+        fetchEvents(),
+        fetchNewsList(),
+      ])
+      const eventList = eventResult.status === 'fulfilled' ? eventResult.value : []
+      const fetchedNewsList = newsResult.status === 'fulfilled' ? newsResult.value : []
+      setEvents(eventList)
+      setNewsList(inheritEventLifecycle(fetchedNewsList, eventList))
+
+      if (eventList.length > 0) {
+        setSelectedEventId((current) =>
+          eventList.some((item) => item.id === current) ? current : eventList[0].id,
+        )
+      } else {
+        setSelectedEventId('')
+      }
+
+      const failures = [eventResult, newsResult]
+        .filter((result) => result.status === 'rejected')
+        .map((result) => result.reason?.message || '请求失败')
+      if (failures.length > 0) {
+        setError(failures.join('；'))
+      }
+    } catch (loadError) {
+      setError(loadError.message || '事件列表加载失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
-    if (!isLoggedIn) {
+    if (!isLoggedIn || activePage !== 'board') {
       return
     }
 
-    let cancelled = false
-
-    async function loadEvents() {
-      setLoading(true)
-      setError('')
-      try {
-        const [eventResult, newsResult] = await Promise.allSettled([
-          fetchEvents(),
-          fetchNewsList(),
-        ])
-        if (cancelled) {
-          return
-        }
-
-        const eventList = eventResult.status === 'fulfilled' ? eventResult.value : []
-        const fetchedNewsList = newsResult.status === 'fulfilled' ? newsResult.value : []
-        setEvents(eventList)
-        setNewsList(fetchedNewsList)
-
-        if (eventList.length > 0) {
-          setSelectedEventId((current) => current || eventList[0].id)
-        }
-
-        const failures = [eventResult, newsResult]
-          .filter((result) => result.status === 'rejected')
-          .map((result) => result.reason?.message || '请求失败')
-        if (failures.length > 0) {
-          setError(failures.join('；'))
-        }
-      } catch (loadError) {
-        if (!cancelled) {
-          setError(loadError.message || '事件列表加载失败')
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
-      }
-    }
-
-    loadEvents()
-
-    return () => {
-      cancelled = true
-    }
-  }, [isLoggedIn])
+    refreshHomeData()
+  }, [activePage, isLoggedIn, refreshHomeData])
 
   useEffect(() => {
     if (!isLoggedIn || !selectedEventId) {
@@ -294,6 +297,7 @@ function App() {
             eventKeywords,
             activeNews.eventId,
             eventDetail?.overview,
+            eventDetail?.lifecycle,
           ),
         )
       } catch (loadError) {
@@ -707,7 +711,7 @@ function App() {
 
         <div className="status-card">
           <span>{sidebarCurrentLabel}</span>
-          <strong>{sidebarCurrentItem?.title ?? '暂无数据'}</strong>
+          <strong>{cleanTitle(sidebarCurrentItem?.title) || '暂无数据'}</strong>
           <small>{sidebarCurrentMeta}</small>
           <button
             type="button"
@@ -780,6 +784,8 @@ function App() {
               selectedEventId={selectedEventId}
               selectedNewsId={selectedNewsId}
               profile={profile}
+              loading={loading}
+              onRefresh={refreshHomeData}
               onSelectNews={openNewsDetail}
               onSelectEvent={openEventDetail}
             />
@@ -837,6 +843,8 @@ function BoardHubPage({
   profile,
   selectedEventId,
   selectedNewsId,
+  loading,
+  onRefresh,
   onSelectNews,
   onSelectEvent,
 }) {
@@ -883,6 +891,12 @@ function BoardHubPage({
           <span>高风险事件</span>
           <strong>{highRiskCount}</strong>
         </div>
+        <div className="summary-card compact board-refresh-card">
+          <span>事件数据</span>
+          <button type="button" className="action-button" onClick={onRefresh} disabled={loading}>
+            {loading ? '刷新中...' : '刷新事件'}
+          </button>
+        </div>
       </div>
 
       <div className="card board-feed-card">
@@ -904,13 +918,13 @@ function BoardHubPage({
                 >
                   <div className="feed-event-head">
                     <div>
-                      <strong>{item.title}</strong>
+                      <strong>{cleanTitle(item.title)}</strong>
                       <p>{item.source || '来源待补充'}</p>
                       <span className="feed-event-linkage">{formatDisplayDateTime(item.publishTime) || '--'}</span>
                     </div>
                   </div>
                 <div className="feed-event-body">
-                  <p>{item.content || '后端暂未返回原文预览。'}</p>
+                  <p>{cleanSummary(item.summary || item.content) || '后端暂未返回原文预览。'}</p>
                 </div>
                 {getVisibleBoardNewsBadges(item).length > 0 ? (
                   <div className="badge-row">
@@ -938,7 +952,7 @@ function BoardHubPage({
           <div>
             <h3>汉堡热榜</h3>
             <p>
-              当前排序：{sortBy === 'heat' ? '按热度从高到低' : '按时间从近到远'}
+              当前排序：{sortBy === 'heat' ? '按热度从高到低' : '按最新动态排序'}
             </p>
           </div>
           <div className="sort-switch">
@@ -954,7 +968,7 @@ function BoardHubPage({
               className={sortBy === 'time' ? 'sort-button active' : 'sort-button'}
               onClick={() => setSortBy('time')}
             >
-              按时间排序
+              按最新动态排序
             </button>
           </div>
         </div>
@@ -969,10 +983,10 @@ function BoardHubPage({
             >
               <div className="rank-index">{index + 1}</div>
               <div className="rank-copy">
-                <strong>{item.title}</strong>
-                <span className="rank-hotness">
-                  {sortBy === 'heat' ? `热度 ${item.heat}` : formatDisplayDateTime(item.updatedAt) || '--'}
-                </span>
+                <strong>{cleanTitle(item.title, 30)}</strong>
+                {sortBy === 'heat' ? (
+                  <span className="rank-hotness">热度 {item.heat}</span>
+                ) : null}
               </div>
             </button>
           ))}
@@ -1071,7 +1085,7 @@ function NewsDetailPage({ news, linkedEventId, linkedEvent, onOpenEvent, onGener
       <div className="card feature-card wide-card">
         <div className="section-head simple-head">
           <div>
-            <h3>{news?.title ?? '新闻详情'}</h3>
+            <h3>{cleanTitle(news?.title) || '新闻详情'}</h3>
             <span>
               {(news?.source || '来源待补充')} · {formatDisplayDateTime(news?.publishTime) || '--'}
             </span>
@@ -1093,7 +1107,7 @@ function NewsDetailPage({ news, linkedEventId, linkedEvent, onOpenEvent, onGener
             ) : null}
           </div>
         </div>
-        {storyText ? <p className="event-story-copy">{storyText}</p> : null}
+        {storyText ? <p className="event-story-copy">{cleanSummary(storyText)}</p> : null}
         {newsBadges.length > 0 ? (
           <div className="badge-row">
             {newsBadges.map((item) => (
@@ -1129,7 +1143,7 @@ function NewsDetailPage({ news, linkedEventId, linkedEvent, onOpenEvent, onGener
             <span>当前新闻对应的情感分析结果。</span>
           </div>
         </div>
-        <SentimentChart sentiment={news?.sentimentDistribution ?? { positive: 0, neutral: 1, negative: 0 }} />
+        <SentimentChart sentiment={news?.sentimentDistribution} />
       </div>
 
       <div className="card detail-card detail-keyword-card">
@@ -1201,10 +1215,11 @@ function DetailPage({ event, allNewsList, initialSelectedNewsId, onGenerateRepor
   const [verifyMessage, setVerifyMessage] = useState('')
   const [selectedNewsId, setSelectedNewsId] = useState(initialSelectedNewsId ? String(initialSelectedNewsId) : '')
   const [authenticityResult, setAuthenticityResult] = useState(null)
-  const [autoVerifyKey, setAutoVerifyKey] = useState('')
+  const [timelineExpanded, setTimelineExpanded] = useState(false)
+  const [keywordsExpanded, setKeywordsExpanded] = useState(false)
   const mergedEventNewsList = useMemo(
-    () => mergeEventNewsWithGlobal(event.newsList ?? [], allNewsList, event.id),
-    [allNewsList, event.id, event.newsList],
+    () => mergeEventNewsWithGlobal(event.newsList ?? [], allNewsList, event.id, event.lifecycle),
+    [allNewsList, event.id, event.lifecycle, event.newsList],
   )
 
   useEffect(() => {
@@ -1213,9 +1228,9 @@ function DetailPage({ event, allNewsList, initialSelectedNewsId, onGenerateRepor
     setReportMessage('')
     setVerifyLoading(false)
     setVerifyMessage('')
-    setAuthenticityResult(null)
     setSelectedNewsId(nextSelectedNewsId)
-    setAutoVerifyKey('')
+    setTimelineExpanded(false)
+    setKeywordsExpanded(false)
   }, [event.id, initialSelectedNewsId, mergedEventNewsList])
 
   useEffect(() => {
@@ -1260,20 +1275,14 @@ function DetailPage({ event, allNewsList, initialSelectedNewsId, onGenerateRepor
     }
   }
 
-  async function handleVerifyAuthenticity(options = {}) {
-    const { silent = false } = options
-
+  async function handleVerifyAuthenticity() {
     if (!event?.id || !selectedNewsId) {
-      if (!silent) {
-        setVerifyMessage('当前新闻缺少可核验的 event_id 或 news_id。')
-      }
+      setVerifyMessage('当前新闻缺少可核验的 event_id 或 news_id。')
       return
     }
 
     setVerifyLoading(true)
-    if (!silent) {
-      setVerifyMessage('')
-    }
+    setVerifyMessage('')
 
     try {
       const verifyResponse = await verifyNews({
@@ -1294,47 +1303,71 @@ function DetailPage({ event, allNewsList, initialSelectedNewsId, onGenerateRepor
 
       if (nextResult) {
         setAuthenticityResult(nextResult)
-        if (!silent) {
-          setVerifyMessage('真实性核验结果已更新。')
-        }
+        setVerifyMessage('真实性核验结果已更新。')
       } else {
-        if (!silent) {
-          setVerifyMessage('')
-        }
+        setVerifyMessage('')
       }
     } catch (verifyError) {
-      if (!silent) {
-        setVerifyMessage(verifyError.message || '真实性核验暂不可用')
-      }
+      setVerifyMessage(verifyError.message || '真实性核验暂不可用')
     } finally {
       setVerifyLoading(false)
     }
   }
 
   useEffect(() => {
-    if (!selectedNewsId) {
+    if (!event?.id || !selectedNewsId) {
+      setAuthenticityResult(null)
       return
     }
 
-    const currentKey = `${event.id}:${selectedNewsId}`
-    if (autoVerifyKey === currentKey) {
-      return
+    let cancelled = false
+    setAuthenticityResult(null)
+
+    async function loadExistingVerifyResult() {
+      try {
+        const response = await fetchVerifyResult(
+          event.id,
+          Number(selectedNewsId) || selectedNewsId,
+        )
+        const existingResult = extractVerifyPayload(response)
+
+        if (!cancelled && existingResult) {
+          setAuthenticityResult(existingResult)
+        }
+      } catch {
+        // No saved ArticleVerification result yet; analysis starts only by user action.
+      }
     }
 
-    setAutoVerifyKey(currentKey)
-    handleVerifyAuthenticity({ silent: true })
-  }, [autoVerifyKey, event.id, selectedNewsId])
+    loadExistingVerifyResult()
+
+    return () => {
+      cancelled = true
+    }
+  }, [event.id, selectedNewsId])
 
   const storyText = buildEventStory(event)
   const storyBadges = getVisibleStoryBadges(event)
   const overviewItems = getVisibleOverviewItems(event.overview)
+  const hasCollapsedTimeline = event.timeline.length > 5
+  const visibleTimeline = useMemo(
+    () =>
+      timelineExpanded
+        ? event.timeline
+        : selectKeyTimelineNodes(event.timeline, mergedEventNewsList, 5),
+    [event.timeline, mergedEventNewsList, timelineExpanded],
+  )
+  const keywordPresentation = useMemo(
+    () => prepareEventKeywords(event.keywords, keywordsExpanded ? Number.POSITIVE_INFINITY : DEFAULT_KEYWORD_LIMIT),
+    [event.keywords, keywordsExpanded],
+  )
   return (
     <section className="page-grid detail-grid">
       <div className="card feature-card wide-card">
         <div className="event-story-head">
-          <h3>{event.title}</h3>
+          <h3>{cleanTitle(event.title)}</h3>
         </div>
-        {storyText ? <p className="event-story-copy">{storyText}</p> : null}
+        {storyText ? <p className="event-story-copy">{cleanSummary(storyText)}</p> : null}
         {storyBadges.length > 0 ? (
           <div className="badge-row">
             {storyBadges.map((item) => (
@@ -1377,10 +1410,24 @@ function DetailPage({ event, allNewsList, initialSelectedNewsId, onGenerateRepor
           </div>
         </div>
         <ul className="timeline-list">
-          {event.timeline.map((item) => (
-            <li key={item}>{item}</li>
+          {visibleTimeline.map((item, index) => (
+            <li key={`${item?.newsId ?? getTimelineNodeText(item)}-${index}`}>
+              {getTimelineNodeText(item)}
+            </li>
           ))}
         </ul>
+        {hasCollapsedTimeline ? (
+          <div className="timeline-actions">
+            <button
+              type="button"
+              className="timeline-toggle-button"
+              aria-expanded={timelineExpanded}
+              onClick={() => setTimelineExpanded((current) => !current)}
+            >
+              {timelineExpanded ? '收起时间线' : `展开全部（共 ${event.timeline.length} 个节点）`}
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <div className="card wide-card">
@@ -1411,14 +1458,37 @@ function DetailPage({ event, allNewsList, initialSelectedNewsId, onGenerateRepor
         <div className="section-head simple-head">
           <div>
             <h3>关键词</h3>
-            <span>当前事件高频关键词。</span>
+            <span>聚焦事件实体、行为变化与舆情关注点。</span>
           </div>
         </div>
-        <div className="keyword-cloud">
-          {event.keywords.map((keyword) => (
-            <span key={keyword}>{keyword}</span>
-          ))}
-        </div>
+        {keywordPresentation.groups.length > 0 ? (
+          <div className="keyword-groups">
+            {keywordPresentation.groups.map((group) => (
+              <section className={`keyword-group keyword-group-${group.key}`} key={group.key}>
+                <h4>{group.label}</h4>
+                <div className="keyword-cloud">
+                  {group.keywords.map((keyword) => (
+                    <span key={keyword}>{keyword}</span>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        ) : (
+          <p className="section-empty-text">暂无具有事件分析价值的关键词。</p>
+        )}
+        {keywordPresentation.hasMore || keywordsExpanded ? (
+          <div className="keyword-actions">
+            <button
+              type="button"
+              className="keyword-toggle-button"
+              aria-expanded={keywordsExpanded}
+              onClick={() => setKeywordsExpanded((current) => !current)}
+            >
+              {keywordsExpanded ? '收起关键词' : `展开更多关键词（共 ${keywordPresentation.total} 个）`}
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <div className="card detail-card detail-platform-card">
@@ -1468,12 +1538,22 @@ function DetailPage({ event, allNewsList, initialSelectedNewsId, onGenerateRepor
 }
 
 function EventNewsReader({ newsList, selectedNewsId, onSelectNews }) {
+  const [isFullContentExpanded, setIsFullContentExpanded] = useState(false)
   const selectedNews =
     Array.isArray(newsList) && newsList.length > 0
       ? newsList.find((item) => item.id === selectedNewsId) ?? newsList[0]
       : null
+  const contentPresentation = buildNewsContentPresentation(
+    selectedNews?.content,
+    isFullContentExpanded,
+  )
+
+  useEffect(() => {
+    setIsFullContentExpanded(false)
+  }, [selectedNews?.id])
+
   const analysisItems = [
-    { label: 'NLP 摘要', value: selectedNews?.summary },
+    { label: 'NLP 摘要', value: cleanSummary(selectedNews?.summary) },
     {
       label: '关键词',
       value: selectedNews?.keywords?.length > 0 ? selectedNews.keywords.join('、') : '',
@@ -1508,7 +1588,7 @@ function EventNewsReader({ newsList, selectedNewsId, onSelectNews }) {
               >
                 <span className="news-reader-index">{index + 1}</span>
                 <div className="news-reader-copy">
-                  <strong>{item.title}</strong>
+                  <strong>{cleanTitle(item.title)}</strong>
                   <small>
                     {item.source || '来源待补充'} · {formatDisplayDateTime(item.publishTime) || '--'}
                   </small>
@@ -1520,7 +1600,7 @@ function EventNewsReader({ newsList, selectedNewsId, onSelectNews }) {
           <div className="news-reader-panel">
             <div className="news-reader-panel-head">
               <div>
-                <strong>{selectedNews?.title ?? '当前未选择新闻'}</strong>
+                <strong>{cleanTitle(selectedNews?.title) || '当前未选择新闻'}</strong>
                 <small>
                   {selectedNews
                     ? `${selectedNews.source || '来源待补充'} · ${formatDisplayDateTime(selectedNews.publishTime) || '--'}`
@@ -1539,9 +1619,19 @@ function EventNewsReader({ newsList, selectedNewsId, onSelectNews }) {
               ) : null}
             </div>
 
-            {selectedNews?.content ? (
+            {contentPresentation.fullContent ? (
               <div className="news-reader-content">
-                <p>{selectedNews.content}</p>
+                <p>{contentPresentation.displayContent}</p>
+                {contentPresentation.isLong ? (
+                  <button
+                    type="button"
+                    className="news-reader-expand-button"
+                    aria-expanded={isFullContentExpanded}
+                    onClick={() => setIsFullContentExpanded((current) => !current)}
+                  >
+                    {isFullContentExpanded ? '收起全文' : '展开全文'}
+                  </button>
+                ) : null}
               </div>
             ) : null}
 
@@ -1583,8 +1673,28 @@ function AuthenticityCard({
   const displayResult = authenticity?.conclusion ? authenticity : normalizeLegacyVerifyResult(authenticity)
   const reasons = normalizeStringList(displayResult?.reasons)
   const evidenceCards = Array.isArray(displayResult?.evidenceCards) ? displayResult.evidenceCards : []
+  const sourceStatistics =
+    displayResult?.sourceStatistics?.length > 0
+      ? displayResult.sourceStatistics
+      : aggregateEvidenceSources(evidenceCards)
+  const authenticityAssessment = displayResult?.authenticityAssessment
+  const evidenceCompleteness = displayResult?.evidenceCompleteness
   const uncertainties = normalizeStringList(displayResult?.uncertainties)
   const technicalDetails = Array.isArray(displayResult?.technicalDetails) ? displayResult.technicalDetails : []
+  const presentation = buildAuthenticityPresentation({
+    authenticityAssessment,
+    reasons,
+    evidenceCards,
+    sourceStatistics,
+    uncertainties,
+  })
+  const offlineScopeNotes = presentation.scopeNotes.filter((item) => /联网|检索/.test(item))
+  const modelScopeNotes = presentation.scopeNotes.filter((item) =>
+    /模型|权威|最终认定|证据关系/.test(item),
+  )
+  const dataScopeNotes = presentation.scopeNotes.filter(
+    (item) => !offlineScopeNotes.includes(item) && !modelScopeNotes.includes(item),
+  )
   const hasDisplayResult = Boolean(displayResult)
 
   return (
@@ -1592,59 +1702,108 @@ function AuthenticityCard({
       {hasDisplayResult ? (
         <>
           <div className="verify-result-heading">
-            <h3>{displayResult.headline || '真实性风险提示'}</h3>
-            {displayResult.verdict ? <strong>{displayResult.verdict}</strong> : null}
-            {displayResult.conclusion ? <p>{displayResult.conclusion}</p> : null}
+            <h3>
+              {authenticityAssessment?.label
+                ? `真实性：${authenticityAssessment.label}`
+                : toPublicOpinionText(displayResult.headline) || '事件可信度分析'}
+            </h3>
+            <div className="verify-metric-badges">
+              {evidenceCompleteness?.label ? <span>证据完整度 {evidenceCompleteness.label}</span> : null}
+              {!authenticityAssessment?.label && displayResult.verdict ? <strong>{displayResult.verdict}</strong> : null}
+            </div>
+            <p>{toPublicOpinionText(presentation.summary || displayResult.conclusion)}</p>
           </div>
           <div className="verify-result-sections">
-            {reasons.length > 0 ? (
-              <section className="verify-result-section">
-                <h4>判断依据</h4>
-                <ul className="authenticity-note-list">
-                  {reasons.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
-            {evidenceCards.length > 0 ? (
+            {sourceStatistics.length > 0 ? (
               <section className="verify-result-section">
                 <h4>证据来源</h4>
-                <div className="evidence-card-list">
-                  {evidenceCards.map((item, index) => (
-                    <article className="evidence-card" key={`${item.newsId || 'evidence'}-${index}`}>
-                      <div className="evidence-card-head">
-                        <strong>{item.source || '来源待补充'}</strong>
-                        {item.sourceDescription ? <span>· {item.sourceDescription}</span> : null}
-                      </div>
-                      {item.quote ? <blockquote>{item.quote}</blockquote> : null}
-                      {item.explanation ? <p>{item.explanation}</p> : null}
-                    </article>
+                <div className="source-stat-list">
+                  {sourceStatistics.map((item) => (
+                    <span className="source-stat-pill" key={`${item.type}-${item.label}`}>
+                      {item.label} {item.count}条
+                    </span>
                   ))}
                 </div>
               </section>
             ) : null}
-            {uncertainties.length > 0 ? (
+            {presentation.reasons.length > 0 ? (
               <section className="verify-result-section">
-                <h4>核验范围</h4>
+                <h4>判断依据</h4>
                 <ul className="authenticity-note-list">
-                  {uncertainties.map((item) => (
-                    <li key={item}>{item}</li>
+                  {presentation.reasons.map((item) => (
+                    <li key={item}>{toPublicOpinionText(item)}</li>
                   ))}
                 </ul>
               </section>
             ) : null}
-            {technicalDetails.length > 0 ? (
-              <details className="verify-technical-details">
-                <summary>技术详情</summary>
-                <dl>
-                  {technicalDetails.map((item) => (
-                    <div key={item.label}>
-                      <dt>{item.label}</dt>
-                      <dd>{item.value}</dd>
-                    </div>
-                  ))}
-                </dl>
+            {presentation.evidenceCards.length > 0 ? (
+              <section className="verify-result-section">
+                <details className="verify-evidence-details">
+                  <summary>查看逐条证据（{presentation.evidenceCards.length}）</summary>
+                  <div className="evidence-card-list">
+                    {presentation.evidenceCards.map((item, index) => (
+                      <article className={`evidence-card evidence-card-${item.stanceKey || 'related'}`} key={`${item.newsId || 'evidence'}-${index}`}>
+                        <div className="evidence-card-head">
+                          <strong>{item.source || '来源待补充'}</strong>
+                          {item.sourceDescription ? <span>· {item.sourceDescription}</span> : null}
+                          {item.stance ? <em>{item.stance}</em> : null}
+                        </div>
+                        {item.quote ? <blockquote>{item.quote}</blockquote> : null}
+                        {item.explanation ? <p>{toPublicOpinionText(item.explanation)}</p> : null}
+                      </article>
+                    ))}
+                  </div>
+                </details>
+              </section>
+            ) : null}
+            {presentation.scopeNotes.length > 0 || technicalDetails.length > 0 ? (
+              <details className="verify-technical-details verify-scope-details">
+                <summary>技术说明 / 分析范围</summary>
+                <div className="verify-scope-groups">
+                    <section>
+                      <h4>数据来源范围</h4>
+                      <ul className="authenticity-note-list">
+                        {(dataScopeNotes.length > 0
+                          ? dataScopeNotes
+                          : ['分析范围为当前输入的新闻材料及其已返回证据。']
+                        ).map((item) => (
+                          <li key={item}>{toPublicOpinionText(item)}</li>
+                        ))}
+                      </ul>
+                    </section>
+                    <section>
+                      <h4>未联网检索说明</h4>
+                      <ul className="authenticity-note-list">
+                        {(offlineScopeNotes.length > 0
+                          ? offlineScopeNotes
+                          : ['本次分析仅使用当前输入材料，未额外联网检索其他报道。']
+                        ).map((item) => (
+                          <li key={item}>{toPublicOpinionText(item)}</li>
+                        ))}
+                      </ul>
+                    </section>
+                    <section>
+                      <h4>模型限制</h4>
+                      <ul className="authenticity-note-list">
+                        {(modelScopeNotes.length > 0
+                          ? modelScopeNotes
+                          : ['结论反映当前材料之间的证据关系，不代表最终权威认定。']
+                        ).map((item) => (
+                          <li key={item}>{toPublicOpinionText(item)}</li>
+                        ))}
+                      </ul>
+                    </section>
+                </div>
+                {technicalDetails.length > 0 ? (
+                  <dl>
+                    {technicalDetails.map((item) => (
+                      <div key={item.label}>
+                        <dt>{item.label}</dt>
+                        <dd>{item.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : null}
               </details>
             ) : null}
           </div>
@@ -1652,14 +1811,14 @@ function AuthenticityCard({
       ) : (
         <div className="section-head simple-head">
           <div>
-            <h3>真实性风险提示</h3>
+            <h3>事件可信度分析</h3>
           </div>
         </div>
       )}
       <div className="news-verify-panel">
         <div className="verify-toolbar">
           <div className="verify-target">
-            <span>当前核验样本</span>
+            <span>当前分析样本</span>
             {newsList.length > 1 ? (
               <select
                 className="news-select"
@@ -1668,17 +1827,17 @@ function AuthenticityCard({
               >
                 {newsList.map((item) => (
                   <option key={item.id} value={item.id}>
-                    {item.title}
+                    {cleanTitle(item.title)}
                   </option>
                 ))}
               </select>
             ) : (
-              <strong>{selectedNews?.title ?? '当前事件暂无可核验样本'}</strong>
+              <strong>{cleanTitle(selectedNews?.title) || '当前事件暂无分析样本'}</strong>
             )}
             <small>
               {selectedNews
                 ? `${selectedNews.source || '来源待补充'} · ${formatDisplayDateTime(selectedNews.publishTime) || '--'}`
-                : '当前事件暂无可核验新闻样本'}
+                : '当前事件暂无可分析的新闻样本'}
             </small>
           </div>
             <button
@@ -1687,7 +1846,7 @@ function AuthenticityCard({
               onClick={onVerify}
               disabled={verifyLoading || !selectedNewsId}
             >
-            {verifyLoading ? '核验中...' : '重新核验'}
+            {verifyLoading ? '分析中...' : hasDisplayResult ? '重新分析' : '开始真实性分析'}
             </button>
           </div>
 
@@ -1783,6 +1942,22 @@ function ProfilePage({ profile, setProfile, onSubmit }) {
       </div>
 
       <form className="profile-grid" onSubmit={onSubmit}>
+        <div className="card wide-card filter-toggle-card">
+          <label className="filter-toggle">
+            <input
+              type="checkbox"
+              checked={profile.filterEnabled === true}
+              onChange={(event) =>
+                setProfile((current) => ({ ...current, filterEnabled: event.target.checked }))
+              }
+            />
+            <span>
+              <strong>启用首页偏好筛选</strong>
+              <small>关闭时首页展示全部事件；开启后才按下方关键词和平台筛选。</small>
+            </span>
+          </label>
+        </div>
+
         <div className="card">
           <div className="section-head simple-head">
             <h3>关注关键词</h3>
@@ -1813,6 +1988,7 @@ function ProfilePage({ profile, setProfile, onSubmit }) {
             <div className="summary-list">
               <span className="summary-pill">关键词：{profile.keywords.join('、') || '未填写'}</span>
               <span className="summary-pill">平台：{profile.platforms.join('、') || '未填写'}</span>
+              <span className="summary-pill">首页筛选：{profile.filterEnabled ? '已启用' : '未启用'}</span>
             </div>
           </div>
           <button type="submit" className="primary-button compact">保存配置</button>
@@ -2235,9 +2411,20 @@ function buildTrendYAxisTicks(max, axisBottomY) {
 }
 
 function SentimentChart({ sentiment }) {
-  const total = sentiment.positive + sentiment.neutral + sentiment.negative || 1
-  const positive = Math.round((sentiment.positive / total) * 100)
-  const neutral = Math.round((sentiment.neutral / total) * 100)
+  const positiveValue = Number(sentiment?.positive)
+  const neutralValue = Number(sentiment?.neutral)
+  const negativeValue = Number(sentiment?.negative)
+  const hasValidDistribution = [positiveValue, neutralValue, negativeValue].every(
+    (value) => Number.isFinite(value) && value >= 0,
+  )
+  const total = hasValidDistribution ? positiveValue + neutralValue + negativeValue : 0
+
+  if (total <= 0) {
+    return <p className="section-empty-text">暂无情感数据</p>
+  }
+
+  const positive = Math.round((positiveValue / total) * 100)
+  const neutral = Math.round((neutralValue / total) * 100)
   const negative = Math.max(0, 100 - positive - neutral)
 
   return (
@@ -2280,6 +2467,7 @@ function buildProfilePayload(profile) {
   return {
     keywords: normalizeTagList(profile.keywords),
     platforms: normalizeTagList(profile.platforms),
+    filterEnabled: profile.filterEnabled === true,
   }
 }
 
@@ -2522,88 +2710,6 @@ function normalizeBoardNewsList(newsList) {
   })
 }
 
-function filterBoardContent(events, newsList, profile) {
-  const baseEvents = Array.isArray(events) ? events : []
-  const baseNewsList = Array.isArray(newsList) ? newsList : []
-  const keywordFilters = normalizeTagList(profile?.keywords).map(normalizePreferenceText)
-  const platformFilters = normalizeTagList(profile?.platforms).map(normalizePreferenceText)
-
-  if (keywordFilters.length === 0 && platformFilters.length === 0) {
-    return { events: baseEvents, newsList: baseNewsList }
-  }
-
-  const isNewsVisible = (news) =>
-    matchesPreferenceFilters(
-      getNewsPreferenceText(news),
-      getNewsPlatformText(news),
-      keywordFilters,
-      platformFilters,
-    )
-
-  const filteredNewsList = baseNewsList.filter(isNewsVisible)
-  const filteredEvents = baseEvents.filter((event) => {
-    const relatedNews = baseNewsList.filter(
-      (news) => String(resolveNewsEventId(news, baseEvents)) === String(event.id),
-    )
-    const keywordText = [
-      getEventPreferenceText(event),
-      ...relatedNews.map(getNewsPreferenceText),
-    ].join(' ')
-    const platformText = [
-      getEventPlatformText(event),
-      ...relatedNews.map(getNewsPlatformText),
-    ].join(' ')
-
-    return matchesPreferenceFilters(keywordText, platformText, keywordFilters, platformFilters)
-  })
-
-  return { events: filteredEvents, newsList: filteredNewsList }
-}
-
-function matchesPreferenceFilters(keywordText, platformText, keywordFilters, platformFilters) {
-  const matchesKeywords =
-    keywordFilters.length === 0 || keywordFilters.some((keyword) => keywordText.includes(keyword))
-  const matchesPlatforms =
-    platformFilters.length === 0 || platformFilters.some((platform) => platformText.includes(platform))
-
-  return matchesKeywords && matchesPlatforms
-}
-
-function getNewsPreferenceText(news) {
-  return normalizePreferenceText([
-    news?.title,
-    news?.summary,
-    news?.content,
-    news?.eventTitle,
-    ...(Array.isArray(news?.keywords) ? news.keywords : []),
-  ].join(' '))
-}
-
-function getNewsPlatformText(news) {
-  return normalizePreferenceText([
-    news?.source,
-    ...(Array.isArray(news?.platforms) ? news.platforms.map((item) => item?.name) : []),
-  ].join(' '))
-}
-
-function getEventPreferenceText(event) {
-  return normalizePreferenceText([
-    event?.title,
-    event?.summary,
-    ...(Array.isArray(event?.keywords) ? event.keywords : []),
-  ].join(' '))
-}
-
-function getEventPlatformText(event) {
-  return normalizePreferenceText(
-    (Array.isArray(event?.platforms) ? event.platforms : []).map((item) => item?.name).join(' '),
-  )
-}
-
-function normalizePreferenceText(value) {
-  return String(value ?? '').trim().toLocaleLowerCase()
-}
-
 function buildBoardEventList(events, newsList) {
   const baseEvents = Array.isArray(events) ? events : []
   const availableNews = Array.isArray(newsList) ? newsList : []
@@ -2709,7 +2815,7 @@ function resolveNewsEventId(news, events) {
   return matchedByNews?.id ? String(matchedByNews.id) : ''
 }
 
-function mergeEventNewsWithGlobal(eventNewsList, globalNewsList, eventId) {
+function mergeEventNewsWithGlobal(eventNewsList, globalNewsList, eventId, eventLifecycle = '') {
   const localNewsList = Array.isArray(eventNewsList) ? eventNewsList : []
   const availableGlobalNews = Array.isArray(globalNewsList) ? globalNewsList : []
 
@@ -2722,13 +2828,18 @@ function mergeEventNewsWithGlobal(eventNewsList, globalNewsList, eventId) {
       return sameId || (sameTitle && sameEvent)
     })
 
-    return matchedGlobalNews
+    const mergedNews = matchedGlobalNews
       ? {
           ...item,
           ...matchedGlobalNews,
           id: item.id,
         }
       : item
+
+    return {
+      ...mergedNews,
+      lifecycle: eventLifecycle || '',
+    }
   })
 }
 
@@ -2738,6 +2849,7 @@ function mergeEventNewsIntoGlobalList(
   eventKeywords = [],
   eventId = '',
   eventOverview = {},
+  eventLifecycle = '',
 ) {
   const currentNews = Array.isArray(currentNewsList) ? currentNewsList : []
   const eventNews = Array.isArray(eventNewsList) ? eventNewsList : []
@@ -2747,8 +2859,14 @@ function mergeEventNewsIntoGlobalList(
   const mergedCurrentNews = currentNews.map((existing) => {
     const fetched = fetchedById.get(String(existing.id))
     if (!fetched) {
-      return String(existing.eventId) === String(eventId) && !existing.keywords?.length && eventKeywords.length
-        ? { ...existing, keywords: eventKeywords }
+      return String(existing.eventId) === String(eventId)
+        ? {
+            ...existing,
+            lifecycle: eventLifecycle || '',
+            ...(!existing.keywords?.length && eventKeywords.length
+              ? { keywords: eventKeywords }
+              : {}),
+          }
         : existing
     }
 
@@ -2768,7 +2886,7 @@ function mergeEventNewsIntoGlobalList(
           : eventKeywords,
       heat: fetched.heat ?? existing.heat,
       riskLevel: fetched.riskLevel || existing.riskLevel,
-      lifecycle: fetched.lifecycle || existing.lifecycle,
+      lifecycle: eventLifecycle || '',
       sentiment: fetched.sentiment || existing.sentiment,
       eventId: fetched.eventId || existing.eventId,
       eventTitle: fetched.eventTitle || existing.eventTitle,
@@ -2781,6 +2899,7 @@ function mergeEventNewsIntoGlobalList(
       .filter((item) => !knownIds.has(String(item.id)))
       .map((item) => ({
         ...item,
+        lifecycle: eventLifecycle || '',
         keywords: item.keywords?.length ? item.keywords : eventKeywords,
         overview: mergeNewsOverview(eventOverview, item.overview),
       })),
@@ -2963,6 +3082,9 @@ function normalizeDisplayVerifyResult(displayResult, envelope) {
     displayResult.verdict ?? displayResult.status ?? displayResult.result,
     evidenceCards,
   )
+  const authenticityAssessment = normalizeVerifyMetric(envelope.authenticity_assessment)
+  const evidenceCompleteness = normalizeVerifyMetric(envelope.evidence_completeness)
+  const sourceStatistics = normalizeSourceStatistics(envelope.source_statistics)
 
   if (!headline && !conclusion && reasons.length === 0 && evidenceCards.length === 0 && uncertainties.length === 0) {
     return null
@@ -2971,9 +3093,12 @@ function normalizeDisplayVerifyResult(displayResult, envelope) {
   return {
     headline,
     verdict,
-    conclusion: conclusion ?? '后端暂未返回可展示的核验结论。',
+    conclusion: conclusion ?? '当前暂未形成可展示的事件分析结论。',
     reasons,
     evidenceCards,
+    authenticityAssessment,
+    evidenceCompleteness,
+    sourceStatistics,
     uncertainties,
     technicalDetails: collectVerifyTechnicalDetails(displayResult, envelope),
   }
@@ -3005,17 +3130,29 @@ function normalizeLegacyVerifyResult(rawResult) {
     explanation: '',
     url: '',
   }))
+  const authenticityAssessment = normalizeVerifyMetric(rawResult.authenticity_assessment)
+  const evidenceCompleteness = normalizeVerifyMetric(rawResult.evidence_completeness)
+  const sourceStatistics = normalizeSourceStatistics(rawResult.source_statistics)
 
-  if (!legacyConclusion && !reason && uncertainties.length === 0 && evidenceCards.length === 0) {
+  if (
+    !legacyConclusion &&
+    !reason &&
+    !authenticityAssessment &&
+    uncertainties.length === 0 &&
+    evidenceCards.length === 0
+  ) {
     return null
   }
 
   return {
     headline: null,
     verdict: formatVerifyVerdictLabel(legacyConclusion),
-    conclusion: reason ?? '后端暂未返回可展示的核验结论。',
+    conclusion: authenticityAssessment?.explanation ?? reason ?? '当前暂未形成可展示的事件分析结论。',
     reasons: [],
     evidenceCards,
+    authenticityAssessment,
+    evidenceCompleteness,
+    sourceStatistics,
     uncertainties,
     technicalDetails: collectVerifyTechnicalDetails(rawResult),
   }
@@ -3133,11 +3270,11 @@ function formatVerifyVerdictLabel(value) {
     supported: '多来源支持',
     contradicted: '多来源反驳',
     conflicting: '信息存在冲突',
-    insufficient_evidence: '证据不足',
-    not_verifiable: '暂不可核验',
+    insufficient_evidence: '信息有待补充',
+    not_verifiable: '暂缺分析条件',
   }
 
-  return labels[normalized] ?? normalized ?? '证据不足'
+  return labels[normalized] ?? normalized ?? '信息有待补充'
 }
 
 function resolveVerifyVerdict(value, evidenceCards) {
@@ -3160,7 +3297,7 @@ function resolveVerifyVerdict(value, evidenceCards) {
     return '多来源反驳'
   }
 
-  return '证据不足'
+  return '信息有待补充'
 }
 
 function formatVerifyStance(value) {

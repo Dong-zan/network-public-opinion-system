@@ -19,6 +19,17 @@ event_news_router = APIRouter(
 )
 
 
+def _sentiment_distribution(analysis: Analysis | None):
+    if analysis is None:
+        return None
+
+    return {
+        "positive": analysis.positive,
+        "neutral": analysis.neutral,
+        "negative": analysis.negative,
+    }
+
+
 @router.get("", response_model=NewsListResponse)
 def get_news(db: Session = Depends(get_db)):
     rows = (
@@ -58,6 +69,7 @@ def get_news(db: Session = Depends(get_db)):
                 "risk_level": analysis.risk_level if analysis else None,
                 "stage": analysis.stage if analysis else None,
                 "platform": article.platform,
+                "sentiment_distribution": _sentiment_distribution(analysis),
             }
         )
 
@@ -88,8 +100,12 @@ def get_event_news(
             detail="事件不存在",
         )
 
-    articles = (
-        db.query(Article)
+    rows = (
+        db.query(Article, Analysis)
+        .outerjoin(
+            Analysis,
+            Analysis.news_id == Article.news_id,
+        )
         .filter(Article.event_id == event_id)
         .order_by(
             Article.publish_time.desc(),
@@ -100,7 +116,7 @@ def get_event_news(
 
     data = []
 
-    for article in articles:
+    for article, analysis in rows:
         content = article.content or ""
         data.append(
             {
@@ -112,6 +128,7 @@ def get_event_news(
                 "summary": content[:200],
                 "content": article.content,
                 "url": article.url,
+                "sentiment_distribution": _sentiment_distribution(analysis),
             }
         )
 

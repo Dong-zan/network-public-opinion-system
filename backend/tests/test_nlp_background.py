@@ -12,6 +12,7 @@ from sqlalchemy.pool import StaticPool
 from backend_app.database import Base
 from backend_app.internal.articles import (
     analyze_article_in_background,
+    normalize_publish_time,
     receive_article,
 )
 from backend_app.models.analysis import Analysis
@@ -148,6 +149,71 @@ class NLPBackgroundTaskTests(unittest.TestCase):
             tasks.tasks[0].func,
             analyze_article_in_background,
         )
+
+    def test_backend_normalizes_valid_and_mojibake_publish_times(self):
+        self.assertEqual(
+            normalize_publish_time("2026-07-13 22:01:00"),
+            datetime(2026, 7, 13, 22, 1),
+        )
+        self.assertIsNone(
+            normalize_publish_time("2026е№ҙ07жңҲ13ж—Ҙ 22:01гҖҖ"),
+        )
+
+    def test_invalid_publish_time_does_not_fail_ingestion(self):
+        db = self.Session()
+        tasks = BackgroundTasks()
+
+        response = receive_article(
+            data=[
+                ArticleCreate(
+                    title="乱码时间新闻",
+                    content="正文",
+                    publish_time="2026е№ҙ07жңҲ13ж—Ҙ 22:01гҖҖ",
+                ),
+                ArticleCreate(
+                    title="正常时间新闻",
+                    content="正文",
+                    publish_time="2026-07-13 22:01:00",
+                ),
+            ],
+            background_tasks=tasks,
+            db=db,
+        )
+
+        saved_articles = db.query(Article).order_by(Article.news_id).all()
+        self.assertEqual(response["code"], 200)
+        self.assertEqual(len(response["data"]["news_ids"]), 2)
+        self.assertIsNone(saved_articles[0].publish_time)
+        self.assertEqual(
+            saved_articles[1].publish_time,
+            datetime(2026, 7, 13, 22, 1),
+        )
+        self.assertEqual(len(tasks.tasks), 2)
+        db.close()
+
+    def test_one_article_failure_does_not_rollback_later_article(self):
+        db = self.Session()
+        tasks = BackgroundTasks()
+        valid_article = Article(title="正常文章", content="正常正文")
+
+        with patch(
+            "backend_app.internal.articles.Article",
+            side_effect=[ValueError("bad article"), valid_article],
+        ):
+            response = receive_article(
+                data=[
+                    ArticleCreate(title="坏文章", content="坏正文"),
+                    ArticleCreate(title="正常文章", content="正常正文"),
+                ],
+                background_tasks=tasks,
+                db=db,
+            )
+
+        self.assertEqual(response["code"], 200)
+        self.assertEqual(len(response["data"]["news_ids"]), 1)
+        self.assertEqual(db.query(Article).count(), 1)
+        self.assertEqual(len(tasks.tasks), 1)
+        db.close()
 
     @patch("backend_app.services.ai_service.AIService.try_generate_report")
     @patch("backend_app.internal.articles.NLPClient.analyze")

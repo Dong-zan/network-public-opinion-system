@@ -159,11 +159,7 @@ function normalizeNewsItem(item, index = 0, eventContext = {}) {
       normalizeMaybeEmptyText(item.riskLevel) ??
       normalizeMaybeEmptyText(eventContext.riskLevel) ??
       '',
-    lifecycle:
-      normalizeMaybeEmptyText(item.stage) ??
-      normalizeMaybeEmptyText(item.lifecycle) ??
-      normalizeMaybeEmptyText(eventContext.lifecycle) ??
-      '',
+    lifecycle: normalizeMaybeEmptyText(eventContext.lifecycle) ?? '',
   }
 }
 
@@ -269,23 +265,7 @@ function normalizeSentimentDistribution(primaryValue, fallbackValue) {
     }
   }
 
-  const label = normalizeSentimentText(source)
-  if (!label) {
-    return {
-      positive: 0,
-      neutral: 1,
-      negative: 0,
-    }
-  }
-
-  if (label.includes('正')) {
-    return { positive: 1, neutral: 0, negative: 0 }
-  }
-  if (label.includes('负')) {
-    return { positive: 0, neutral: 0, negative: 1 }
-  }
-
-  return { positive: 0, neutral: 1, negative: 0 }
+  return null
 }
 
 function normalizeTrendValues(trend, fallbackHeat) {

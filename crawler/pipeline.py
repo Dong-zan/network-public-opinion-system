@@ -18,7 +18,7 @@ from typing import List, Optional
 import requests
 
 from crawler.config import OUTPUT_DIR, MAX_ARTICLES_PER_RUN, BACKEND_URL
-from crawler.utils import setup_logger
+from crawler.utils import normalize_publish_time, setup_logger
 from crawler.crawler import fetch_all_news
 from crawler.cleaner import clean_and_dedup, Deduplicator
 logger = setup_logger(__name__)
@@ -97,32 +97,67 @@ def save_articles(articles: List[dict], output_dir: str = None) -> int:
     return _save_to_json(articles, output_dir)
 
 
-def _upload_to_backend(articles: List[dict]) -> int:
+def _upload_to_backend(
+    articles: List[dict],
+    backend_url: str = None,
+) -> int:
     """
     推送新文章到后端 API。
 
     Returns:
         成功推送的条数
     """
-    if not BACKEND_URL or not articles:
+    target_url = backend_url or BACKEND_URL
+    if not target_url or not articles:
         return 0
 
-    try:
-        resp = requests.post(
-            BACKEND_URL,
-            json=articles,
-            headers={"Content-Type": "application/json"},
-            timeout=30,
+    success_count = 0
+    for index, article in enumerate(articles):
+        payload = dict(article)
+        payload["publish_time"] = normalize_publish_time(
+            payload.get("publish_time")
         )
-        if resp.status_code == 200:
-            logger.info(f"后端推送成功: {len(articles)} 篇")
-            return len(articles)
-        else:
-            logger.warning(f"后端推送失败 ({resp.status_code}): {resp.text[:200]}")
-            return 0
-    except Exception as e:
-        logger.warning(f"后端推送异常: {e}")
-        return 0
+        try:
+            resp = requests.post(
+                target_url,
+                json=[payload],
+                headers={"Content-Type": "application/json"},
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                logger.warning(
+                    "单篇文章推送失败 index=%s url=%r status=%s response=%s",
+                    index,
+                    payload.get("url"),
+                    resp.status_code,
+                    resp.text[:200],
+                )
+                continue
+
+            response_data = resp.json().get("data", {})
+            if not response_data.get("news_ids"):
+                logger.warning(
+                    "单篇文章未入库 index=%s url=%r response=%s",
+                    index,
+                    payload.get("url"),
+                    resp.text[:200],
+                )
+                continue
+            success_count += 1
+        except Exception as exc:
+            logger.warning(
+                "单篇文章推送异常，继续下一篇 index=%s url=%r error=%s",
+                index,
+                payload.get("url"),
+                exc,
+            )
+
+    logger.info(
+        "后端推送完成: 成功 %s 篇，失败 %s 篇",
+        success_count,
+        len(articles) - success_count,
+    )
+    return success_count
 
 
 def run_once(

@@ -15,6 +15,14 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
+# Node dependencies and build outputs
+node_modules/
+dist/
+build/
+coverage/
+.vite/
+*.tsbuildinfo
+
 # Logs and temporary files
 *.log
 *.tmp
@@ -28,6 +36,8 @@ __pycache__/
 # Crawler runtime data
 data/
 output/
+backup/
+debug_html/
 
 # IDE and OS metadata
 .idea/
@@ -38,3 +48,8 @@ Thumbs.db
 # Local integration files with environment-specific endpoints
 backend/test_ai.py
 docs/联动接口.md
+
+# Large local delivery documents (keep outside Git)
+docs/double_think.pptx
+docs/double_think.doc
+docs/实践报告模板.doc

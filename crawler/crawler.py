@@ -14,6 +14,7 @@
 import os
 import time
 import hashlib
+import re
 from typing import List, Optional
 import requests
 from bs4 import BeautifulSoup
@@ -61,15 +62,62 @@ def _is_article_url(url: str) -> bool:
 # ============================================================
 
 DEBUG_DIR = "debug_html"
+_WINDOWS_INVALID_FILENAME_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_WINDOWS_RESERVED_FILENAMES = {
+    "CON", "PRN", "AUX", "NUL", "CLOCK$", "CONIN$", "CONOUT$",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
+_MAX_DEBUG_FILENAME_LENGTH = 240
+_CHARSET_PATTERN = re.compile(
+    rb"charset\s*=\s*['\"]?([a-zA-Z0-9._-]+)",
+    re.IGNORECASE,
+)
+_MOJIBAKE_MARKERS = (
+    "锟斤拷", "銆", "锛", "鈥", "е№", "жң", "ж—",
+)
 
 
-def _save_debug_html(filename: str, html: str):
-    """保存 HTML 到调试目录"""
-    os.makedirs(DEBUG_DIR, exist_ok=True)
-    filepath = os.path.join(DEBUG_DIR, filename)
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(html)
-    logger.info(f"  调试 HTML 已保存: {filepath}")
+def _sanitize_debug_filename(filename: str) -> str:
+    """生成可在 Windows 上安全创建的单个文件名。"""
+    sanitized = _WINDOWS_INVALID_FILENAME_PATTERN.sub("", str(filename or ""))
+    sanitized = sanitized.strip(" .")
+
+    if not sanitized:
+        sanitized = "debug.html"
+
+    device_name = sanitized.split(".", 1)[0].rstrip(" .").upper()
+    if device_name in _WINDOWS_RESERVED_FILENAMES:
+        sanitized = f"_{sanitized}"
+
+    stem, extension = os.path.splitext(sanitized)
+    if len(sanitized) > _MAX_DEBUG_FILENAME_LENGTH:
+        available_stem_length = max(
+            1,
+            _MAX_DEBUG_FILENAME_LENGTH - len(extension),
+        )
+        sanitized = f"{stem[:available_stem_length]}{extension}"
+
+    return sanitized
+
+
+def _save_debug_html(filename: str, html: str) -> Optional[str]:
+    """保存 HTML 到调试目录；失败仅记录警告，不中断采集。"""
+    try:
+        safe_filename = _sanitize_debug_filename(filename)
+        os.makedirs(DEBUG_DIR, exist_ok=True)
+        filepath = os.path.join(DEBUG_DIR, safe_filename)
+        with open(filepath, "w", encoding="utf-8") as file:
+            file.write(html)
+        logger.info(f"  调试 HTML 已保存: {filepath}")
+        return filepath
+    except Exception as exc:
+        logger.warning(
+            "  调试 HTML 保存失败，跳过且继续采集: filename=%r error=%s",
+            filename,
+            exc,
+        )
+        return None
 
 
 # ============================================================
@@ -91,6 +139,55 @@ def _make_session() -> requests.Session:
     session = requests.Session()
     session.headers.update(DEFAULT_HEADERS)
     return session
+
+
+def _decode_response_content(
+    response: requests.Response,
+    fallback_encoding: str = "utf-8",
+) -> str:
+    """直接从响应字节选择最可信编码，避免resp.text缓存错误解码。"""
+    content = response.content or b""
+    if not content:
+        return ""
+
+    charset_match = _CHARSET_PATTERN.search(content[:8192])
+    content_encoding = (
+        charset_match.group(1).decode("ascii", errors="ignore")
+        if charset_match
+        else None
+    )
+    encodings = [
+        content_encoding,
+        fallback_encoding,
+        response.apparent_encoding,
+        response.encoding,
+        "utf-8",
+        "gb18030",
+    ]
+    decoded_candidates: list[tuple[int, int, str]] = []
+    seen_encodings = set()
+
+    for priority, encoding in enumerate(encodings):
+        normalized_encoding = str(encoding or "").strip().casefold()
+        if not normalized_encoding or normalized_encoding in seen_encodings:
+            continue
+        seen_encodings.add(normalized_encoding)
+        try:
+            decoded = content.decode(normalized_encoding, errors="strict")
+        except (LookupError, UnicodeDecodeError):
+            continue
+
+        corruption_score = (
+            decoded.count("\ufffd") * 100
+            + len(re.findall(r"[\u0400-\u04ff]", decoded)) * 10
+            + sum(decoded.count(marker) * 20 for marker in _MOJIBAKE_MARKERS)
+        )
+        decoded_candidates.append((corruption_score, priority, decoded))
+
+    if decoded_candidates:
+        return min(decoded_candidates, key=lambda item: (item[0], item[1]))[2]
+
+    return content.decode(fallback_encoding or "utf-8", errors="replace")
 
 
 # ============================================================
@@ -119,12 +216,12 @@ def fetch_news_list(source: dict, session: requests.Session) -> List[str]:
         try:
             resp = session.get(list_url, timeout=REQUEST_TIMEOUT)
             resp.raise_for_status()
-            resp.encoding = resp.apparent_encoding or source["encoding"]
         except requests.RequestException as e:
             logger.warning(f"  请求失败: {list_url} — {e}")
             continue
 
-        soup = BeautifulSoup(resp.text, "lxml")
+        response_text = _decode_response_content(resp, source.get("encoding", "utf-8"))
+        soup = BeautifulSoup(response_text, "lxml")
         channel_count = 0
 
         for link in soup.select(selectors["list_link"]):
@@ -178,12 +275,12 @@ def fetch_article(url: str, source: dict, session: requests.Session) -> Optional
     try:
         resp = session.get(url, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
-        resp.encoding = resp.apparent_encoding or source["encoding"]
     except requests.RequestException as e:
         logger.warning(f"  请求失败，跳过: {url} — {e}")
         return None
 
-    soup = BeautifulSoup(resp.text, "lxml")
+    response_text = _decode_response_content(resp, source.get("encoding", "utf-8"))
+    soup = BeautifulSoup(response_text, "lxml")
 
     # --- 标题 ---
     title_el = _safe_select(soup, selectors["article_title"])
@@ -208,7 +305,7 @@ def fetch_article(url: str, source: dict, session: requests.Session) -> Optional
     else:
         logger.warning(f"  未匹配正文容器，保存调试 HTML: {url}")
         url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
-        _save_debug_html(f"{source['name']}_{url_hash}.html", resp.text)
+        _save_debug_html(f"{source['name']}_{url_hash}.html", response_text)
         body = soup.find("body")
         content = str(body) if body else ""
 

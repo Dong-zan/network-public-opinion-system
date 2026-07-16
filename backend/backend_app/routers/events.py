@@ -50,6 +50,7 @@ def get_events(
     else:
 
         query=query.order_by(
+            Event.update_time.desc(),
             Event.create_time.desc()
         )
 
@@ -76,6 +77,10 @@ def get_events(
             event.title,
 
 
+            "event_name":
+            event.event_name,
+
+
             "summary":
             event.summary,
 
@@ -93,7 +98,11 @@ def get_events(
 
 
             "create_time":
-            event.create_time
+            event.create_time,
+
+
+            "update_time":
+            event.update_time
 
         })
 
@@ -300,6 +309,10 @@ def get_event_detail(
 
             "title":
             event.title,
+
+
+            "event_name":
+            event.event_name,
 
 
             "summary":

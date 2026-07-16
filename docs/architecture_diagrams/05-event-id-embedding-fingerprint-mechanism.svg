@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title desc">
+  <title id="title">基于 Embedding 与事件指纹融合的 Event ID 生成机制</title>
+  <desc id="desc">新闻特征经 text2vec-base-chinese 转换为 768 维向量，以余弦相似度召回 Top-K 事件，再与实体、动作、主题、hashtag 和时间窗口指纹融合评分，经过冲突检测和阈值判断后加入已有事件或创建新事件。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#eef5fb"/></linearGradient>
+    <linearGradient id="deep" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0d3c66"/><stop offset="1" stop-color="#226da5"/></linearGradient>
+    <linearGradient id="soft" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#edf6fd"/><stop offset="1" stop-color="#dcecf8"/></linearGradient>
+    <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse"><path d="M36 0H0V36" fill="none" stroke="#7fa8c7" stroke-width="1" opacity=".10"/></pattern>
+    <filter id="shadow" x="-25%" y="-25%" width="150%" height="150%"><feDropShadow dx="0" dy="8" stdDeviation="11" flood-color="#0b3558" flood-opacity=".13"/></filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0 0l12 6-12 6z" fill="#2f78ad"/></marker>
+    <marker id="arrowDark" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0 0l12 6-12 6z" fill="#123f66"/></marker>
+    <style>
+      .title{font:700 42px 'Microsoft YaHei',sans-serif;fill:#0c3559}.subtitle{font:400 20px 'Microsoft YaHei',sans-serif;fill:#58758d}
+      .stage{font:700 19px 'Microsoft YaHei',sans-serif;fill:#174d76;text-anchor:middle;letter-spacing:1px}.num{font:700 16px 'Microsoft YaHei',sans-serif;fill:#fff;text-anchor:middle}
+      .head{font:700 24px 'Microsoft YaHei',sans-serif;fill:#103a5e;text-anchor:middle}.body{font:400 17px 'Microsoft YaHei',sans-serif;fill:#506d84;text-anchor:middle}.tiny{font:400 14px 'Microsoft YaHei',sans-serif;fill:#607d93;text-anchor:middle}
+      .mono{font:600 16px Consolas,'Microsoft YaHei',sans-serif;fill:#174d76;text-anchor:middle}.chip{font:500 14px Consolas,'Microsoft YaHei',sans-serif;fill:#174d76;text-anchor:middle}
+      .panel{fill:#fff;stroke:#9db9ce;stroke-width:2;filter:url(#shadow)}.flow{fill:none;stroke:#2f78ad;stroke-width:5;marker-end:url(#arrow)}.thin{fill:none;stroke:#6e9cbd;stroke-width:2}.dash{fill:none;stroke:#6e9cbd;stroke-width:2;stroke-dasharray:7 6}
+      .branch{fill:none;stroke:#123f66;stroke-width:4;marker-end:url(#arrowDark)}.branchLabel{font:700 15px 'Microsoft YaHei',sans-serif;fill:#123f66}
+    </style>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#bg)"/><rect width="1920" height="1080" fill="url(#grid)"/>
+  <text x="78" y="82" class="title">基于 Embedding 与事件指纹融合的 Event ID 生成机制</text>
+  <text x="78" y="120" class="subtitle">Semantic Retrieval × Event Fingerprint × Conflict-aware Decision</text>
+  <line x1="78" y1="151" x2="1842" y2="151" stroke="#aac2d5" stroke-width="2"/>
+
+  <!-- stage headers -->
+  <g><circle cx="190" cy="194" r="20" fill="#1d679d"/><text x="190" y="200" class="num">1</text><text x="190" y="237" class="stage">新闻输入层</text></g>
+  <g><circle cx="500" cy="194" r="20" fill="#1d679d"/><text x="500" y="200" class="num">2</text><text x="500" y="237" class="stage">Embedding 层</text></g>
+  <g><circle cx="810" cy="194" r="20" fill="#1d679d"/><text x="810" y="200" class="num">3</text><text x="810" y="237" class="stage">候选召回层</text></g>
+  <g><circle cx="1125" cy="194" r="20" fill="#1d679d"/><text x="1125" y="200" class="num">4</text><text x="1125" y="237" class="stage">事件指纹匹配</text></g>
+  <g><circle cx="1450" cy="194" r="20" fill="#1d679d"/><text x="1450" y="200" class="num">5</text><text x="1450" y="237" class="stage">融合决策层</text></g>
+  <g><circle cx="1740" cy="194" r="20" fill="#1d679d"/><text x="1740" y="200" class="num">6</text><text x="1740" y="237" class="stage">Event ID 输出</text></g>
+
+  <!-- input document and features -->
+  <g filter="url(#shadow)">
+    <path d="M92 318Q92 300 110 300h142l48 48v300q0 18-18 18H110q-18 0-18-18z" fill="#fff" stroke="#719abb" stroke-width="2.5"/>
+    <path d="M252 300v48h48" fill="#dcecf8" stroke="#719abb" stroke-width="2.5"/>
+  </g>
+  <path d="M122 384h140M122 414h110M122 444h130" stroke="#6d96b6" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="145" cy="515" r="19" fill="#d9ebf8" stroke="#4f83aa" stroke-width="2"/><circle cx="193" cy="515" r="19" fill="#d9ebf8" stroke="#4f83aa" stroke-width="2"/><circle cx="241" cy="515" r="19" fill="#d9ebf8" stroke="#4f83aa" stroke-width="2"/>
+  <path d="M145 534v38M193 534v38M241 534v38M145 572h96" class="thin"/>
+  <text x="196" y="620" class="mono">NEWS DOCUMENT</text>
+  <g>
+    <rect x="62" y="708" width="82" height="34" rx="17" fill="#e2f0fa" stroke="#8aafc9"/><text x="103" y="730" class="chip">title</text>
+    <rect x="154" y="708" width="92" height="34" rx="17" fill="#e2f0fa" stroke="#8aafc9"/><text x="200" y="730" class="chip">content</text>
+    <rect x="256" y="708" width="84" height="34" rx="17" fill="#e2f0fa" stroke="#8aafc9"/><text x="298" y="730" class="chip">source</text>
+    <rect x="78" y="754" width="72" height="34" rx="17" fill="#edf6fd" stroke="#8aafc9"/><text x="114" y="776" class="chip">time</text>
+    <rect x="160" y="754" width="82" height="34" rx="17" fill="#edf6fd" stroke="#8aafc9"/><text x="201" y="776" class="chip">entity</text>
+    <rect x="252" y="754" width="98" height="34" rx="17" fill="#edf6fd" stroke="#8aafc9"/><text x="301" y="776" class="chip">#hashtag</text>
+  </g>
+  <path d="M103 708Q120 670 155 655M200 708Q200 680 196 655M298 708Q275 674 235 655" class="dash"/>
+
+  <!-- embedding neural/vector layer -->
+  <path d="M320 500h82" class="flow"/>
+  <g filter="url(#shadow)"><path d="M400 330Q400 300 430 300h145q30 0 30 30v82q0 30-30 30H430q-30 0-30-30z" fill="url(#deep)"/></g>
+  <text x="502" y="350" style="font:700 18px Consolas,'Microsoft YaHei';fill:#fff;text-anchor:middle">text2vec</text><text x="502" y="382" style="font:500 16px Consolas,'Microsoft YaHei';fill:#d9edfb;text-anchor:middle">base-chinese</text><text x="502" y="414" style="font:400 14px 'Microsoft YaHei';fill:#d9edfb;text-anchor:middle">语义编码器</text>
+  <path d="M502 442v42" class="flow"/>
+  <g transform="translate(421 510)">
+    <rect width="162" height="162" rx="18" fill="#fff" stroke="#7ea5c2" stroke-width="2" filter="url(#shadow)"/>
+    <g fill="#2c75aa">
+      <circle cx="25" cy="27" r="7" opacity=".32"/><circle cx="55" cy="27" r="7" opacity=".72"/><circle cx="85" cy="27" r="7" opacity=".45"/><circle cx="115" cy="27" r="7" opacity=".90"/><circle cx="140" cy="27" r="7" opacity=".55"/>
+      <circle cx="25" cy="58" r="7" opacity=".78"/><circle cx="55" cy="58" r="7" opacity=".24"/><circle cx="85" cy="58" r="7" opacity=".92"/><circle cx="115" cy="58" r="7" opacity=".48"/><circle cx="140" cy="58" r="7" opacity=".70"/>
+      <circle cx="25" cy="89" r="7" opacity=".42"/><circle cx="55" cy="89" r="7" opacity=".84"/><circle cx="85" cy="89" r="7" opacity=".30"/><circle cx="115" cy="89" r="7" opacity=".68"/><circle cx="140" cy="89" r="7" opacity=".95"/>
+      <circle cx="25" cy="120" r="7" opacity=".88"/><circle cx="55" cy="120" r="7" opacity=".52"/><circle cx="85" cy="120" r="7" opacity=".76"/><circle cx="115" cy="120" r="7" opacity=".22"/><circle cx="140" cy="120" r="7" opacity=".64"/>
+    </g><text x="81" y="151" class="mono">v ∈ R⁷⁶⁸</text>
+  </g>
+  <text x="502" y="712" class="head">768 维向量</text><text x="502" y="743" class="body">L2 normalized embedding</text>
+
+  <!-- retrieval as query-to-candidate fan -->
+  <path d="M583 590h76" class="flow"/>
+  <circle cx="682" cy="590" r="30" fill="#1d679d"/><text x="682" y="596" class="num">q</text>
+  <g class="thin"><path d="M710 575l86-128M712 584l84-55M712 596l84 42M708 606l88 116"/></g>
+  <g>
+    <ellipse cx="840" cy="430" rx="68" ry="34" fill="#dcecf8" stroke="#5688ad" stroke-width="2"/><text x="840" y="426" class="mono">event_17</text><text x="840" y="449" class="tiny">cos = 0.91</text>
+    <ellipse cx="840" cy="520" rx="68" ry="34" fill="#e8f3fb" stroke="#6d9cbd" stroke-width="2"/><text x="840" y="516" class="mono">event_42</text><text x="840" y="539" class="tiny">cos = 0.87</text>
+    <ellipse cx="840" cy="610" rx="68" ry="34" fill="#edf6fc" stroke="#82a9c5" stroke-width="2"/><text x="840" y="606" class="mono">event_08</text><text x="840" y="629" class="tiny">cos = 0.82</text>
+    <ellipse cx="840" cy="700" rx="68" ry="34" fill="#f4f8fb" stroke="#a1bacd" stroke-width="2"/><text x="840" y="696" class="mono">event_31</text><text x="840" y="719" class="tiny">cos = 0.68</text>
+  </g>
+  <path d="M920 400h38l-22 48v194l22 48h-38l-28-48V448z" fill="#cce3f3" stroke="#4f83aa" stroke-width="2"/>
+  <text x="934" y="552" class="mono" transform="rotate(-90 934 552)">TOP-K FILTER</text>
+  <text x="810" y="790" class="head">Cosine Similarity</text><text x="810" y="821" class="body">Top-K event candidates</text>
+
+  <!-- fingerprint radar and matching -->
+  <path d="M958 545h64" class="flow"/>
+  <g transform="translate(1130 555)">
+    <circle r="145" fill="#fff" stroke="#91b1c8" stroke-width="2" filter="url(#shadow)"/>
+    <circle r="105" fill="none" stroke="#c7d9e6" stroke-width="1.5"/><circle r="65" fill="none" stroke="#d6e4ee" stroke-width="1.5"/>
+    <path d="M0-130L124-40L77 105L-77 105L-124-40Z" fill="none" stroke="#8aabc3" stroke-width="1.5"/>
+    <path d="M0 0V-130M0 0L124-40M0 0L77 105M0 0L-77 105M0 0L-124-40" class="thin"/>
+    <path d="M0-108L100-32L60 82L-54 74L-92-30Z" fill="#2f78ad" fill-opacity=".20" stroke="#226a9e" stroke-width="4"/>
+    <circle cy="-108" r="6" fill="#165a8a"/><circle cx="100" cy="-32" r="6" fill="#165a8a"/><circle cx="60" cy="82" r="6" fill="#165a8a"/><circle cx="-54" cy="74" r="6" fill="#165a8a"/><circle cx="-92" cy="-30" r="6" fill="#165a8a"/>
+    <text x="0" y="-158" class="body">实体 Entity</text><text x="160" y="-38" class="body">动作 Action</text><text x="116" y="137" class="body">主题 Topic</text><text x="-116" y="137" class="body">#Hashtag</text><text x="-167" y="-38" class="body">时间窗口</text>
+  </g>
+  <text x="1130" y="782" class="head">事件指纹相交度</text><text x="1130" y="813" class="body">强指纹 + 弱指纹 + 时间一致性</text>
+
+  <!-- fusion decision process -->
+  <path d="M1276 555h58" class="flow"/>
+  <g filter="url(#shadow)"><circle cx="1405" cy="470" r="72" fill="url(#deep)"/></g>
+  <text x="1405" y="452" style="font:700 22px 'Microsoft YaHei';fill:#fff;text-anchor:middle">综合评分</text><text x="1405" y="484" style="font:500 15px Consolas;fill:#dceefa;text-anchor:middle">S = Σ wᵢ fᵢ</text><text x="1405" y="508" style="font:400 13px 'Microsoft YaHei';fill:#dceefa;text-anchor:middle">语义 × 指纹 × 标题</text>
+  <path d="M1405 542v54" class="flow"/>
+  <polygon points="1405,596 1480,658 1405,720 1330,658" fill="#fff" stroke="#2d6e9d" stroke-width="3" filter="url(#shadow)"/>
+  <text x="1405" y="651" class="head" style="font-size:19px">冲突检测</text><text x="1405" y="678" class="tiny">主体 / 时间 / 地点</text>
+  <path d="M1405 720v50" class="flow"/>
+  <g transform="translate(1405 840)">
+    <path d="M-92 0A92 92 0 0 1 92 0" fill="none" stroke="#c8dce9" stroke-width="18" stroke-linecap="round"/>
+    <path d="M-92 0A92 92 0 0 1 42-82" fill="none" stroke="#2f78ad" stroke-width="18" stroke-linecap="round"/>
+    <line x1="0" y1="0" x2="45" y2="-72" stroke="#123f66" stroke-width="5"/><circle r="9" fill="#123f66"/>
+    <text x="0" y="40" class="head" style="font-size:19px">阈值判断 S ≥ τ</text>
+  </g>
+  <text x="1515" y="476" class="tiny" text-anchor="start">① 综合评分</text><text x="1515" y="505" class="tiny" text-anchor="start">② 硬冲突门控</text><text x="1515" y="534" class="tiny" text-anchor="start">③ 阈值决策</text>
+
+  <!-- outputs, non-rectangular -->
+  <path d="M1498 840h75v-300h65" class="branch"/><text x="1545" y="814" class="branchLabel">PASS</text>
+  <path d="M1405 932v55h233" class="branch"/><text x="1430" y="976" class="branchLabel">REJECT / NO MATCH</text>
+  <g filter="url(#shadow)">
+    <path d="M1660 340h155l55 55v150l-55 55h-155l-55-55V395z" fill="#e2f1fb" stroke="#2674a9" stroke-width="3"/>
+    <path d="M1683 400q50-28 100 0v72q-50 28-100 0z" fill="none" stroke="#246d9f" stroke-width="4"/><ellipse cx="1733" cy="400" rx="50" ry="17" fill="#d4e9f7" stroke="#246d9f" stroke-width="4"/>
+    <text x="1733" y="520" class="head">加入已有 event_id</text><text x="1733" y="550" class="body">复用候选事件并更新中心向量</text>
+  </g>
+  <g filter="url(#shadow)">
+    <path d="M1660 720h155l55 55v150l-55 55h-155l-55-55V775z" fill="#fff" stroke="#5c87a7" stroke-width="3"/>
+    <circle cx="1733" cy="812" r="48" fill="#e7f3fb" stroke="#3b7ba8" stroke-width="3"/><path d="M1733 782v60M1703 812h60" stroke="#2b6f9f" stroke-width="6" stroke-linecap="round"/>
+    <text x="1733" y="900" class="head">创建新 event_id</text><text x="1733" y="930" class="body">新事件入库并初始化事件中心</text>
+  </g>
+
+  <!-- academic footer -->
+  <line x1="78" y1="1022" x2="1842" y2="1022" stroke="#aac2d5" stroke-width="2"/>
+  <text x="78" y="1054" class="tiny" style="text-anchor:start">Decision principle: embedding provides semantic recall; fingerprint constraints preserve event identity; conflict gates prevent semantic-near but fact-different merging.</text>
+</svg>

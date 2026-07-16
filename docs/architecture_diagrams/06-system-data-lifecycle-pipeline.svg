@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title desc">
+  <title id="title">新闻到智能研判的系统数据生命周期</title>
+  <desc id="desc">新闻网站、微博和社交平台的数据经爬虫采集，进入 NLP 清洗、关键词、情感和向量分析，在核心事件理解层完成事件聚合、Event ID、语义匹配、事件指纹和时间约束，再生成热度、生命周期、AI 报告与核验结果，最终服务于看板、事件详情和智能问答。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#edf5fb"/></linearGradient>
+    <linearGradient id="river" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#b9d9ee"/><stop offset=".42" stop-color="#4e94c4"/><stop offset=".62" stop-color="#176396"/><stop offset="1" stop-color="#75a9cb"/></linearGradient>
+    <linearGradient id="core" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0e416b"/><stop offset="1" stop-color="#2379ad"/></linearGradient>
+    <radialGradient id="glow"><stop stop-color="#7db8dd" stop-opacity=".40"/><stop offset="1" stop-color="#7db8dd" stop-opacity="0"/></radialGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="10" stdDeviation="13" flood-color="#0b3558" flood-opacity=".14"/></filter>
+    <filter id="coreShadow" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="13" stdDeviation="18" flood-color="#083858" flood-opacity=".28"/></filter>
+    <marker id="arrow" markerWidth="15" markerHeight="15" refX="13" refY="7.5" orient="auto"><path d="M0 0l15 7.5L0 15z" fill="#236f9f"/></marker>
+    <style>
+      .title{font:700 42px 'Microsoft YaHei',sans-serif;fill:#0b3559}.subtitle{font:400 20px 'Microsoft YaHei',sans-serif;fill:#607c91}
+      .layer{font:700 18px 'Microsoft YaHei',sans-serif;fill:#174d76;text-anchor:middle;letter-spacing:1px}.index{font:700 14px 'Microsoft YaHei',sans-serif;fill:#fff;text-anchor:middle}
+      .head{font:700 25px 'Microsoft YaHei',sans-serif;fill:#103b5f;text-anchor:middle}.body{font:400 16px 'Microsoft YaHei',sans-serif;fill:#58748a;text-anchor:middle}.tiny{font:500 14px 'Microsoft YaHei',sans-serif;fill:#55758e;text-anchor:middle}
+      .whiteHead{font:700 28px 'Microsoft YaHei',sans-serif;fill:#fff;text-anchor:middle}.whiteBody{font:400 16px 'Microsoft YaHei',sans-serif;fill:#d9edf9;text-anchor:middle}
+      .node{fill:#fff;stroke:#7fa8c5;stroke-width:2;filter:url(#shadow)}.softNode{fill:#e7f3fb;stroke:#76a6c7;stroke-width:2}.flow{fill:none;stroke:url(#river);stroke-width:19;stroke-linecap:round;stroke-linejoin:round}.edge{fill:none;stroke:#317aa9;stroke-width:4;marker-end:url(#arrow)}.thin{fill:none;stroke:#77a6c7;stroke-width:2}.dash{fill:none;stroke:#6b9abd;stroke-width:2;stroke-dasharray:7 6}
+    </style>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <text x="76" y="82" class="title">新闻 → 分析 → 事件 → 智能研判</text>
+  <text x="76" y="120" class="subtitle">面向网络舆情的端到端数据生命周期</text>
+  <line x1="76" y1="151" x2="1844" y2="151" stroke="#b5cbdb" stroke-width="2"/>
+
+  <!-- hierarchy labels -->
+  <g><circle cx="166" cy="194" r="17" fill="#2a75a6"/><text x="166" y="199" class="index">1</text><text x="166" y="230" class="layer">数据来源</text></g>
+  <g><circle cx="407" cy="194" r="17" fill="#2a75a6"/><text x="407" y="199" class="index">2</text><text x="407" y="230" class="layer">数据采集</text></g>
+  <g><circle cx="650" cy="194" r="17" fill="#2a75a6"/><text x="650" y="199" class="index">3</text><text x="650" y="230" class="layer">新闻分析</text></g>
+  <g><circle cx="1010" cy="194" r="20" fill="#0e416b"/><text x="1010" y="200" class="index">4</text><text x="1010" y="232" class="layer" style="font-size:21px">事件理解层</text></g>
+  <g><circle cx="1370" cy="194" r="17" fill="#2a75a6"/><text x="1370" y="199" class="index">5</text><text x="1370" y="230" class="layer">事件分析</text></g>
+  <g><circle cx="1705" cy="194" r="17" fill="#2a75a6"/><text x="1705" y="199" class="index">6</text><text x="1705" y="230" class="layer">用户应用</text></g>
+
+  <!-- lifecycle river behind nodes -->
+  <path d="M215 548C300 548 315 548 345 548C455 548 485 548 525 548C745 548 795 548 835 548C1180 548 1200 548 1248 548C1500 548 1520 548 1578 548C1690 548 1765 548 1830 548" class="flow" opacity=".82"/>
+  <path d="M215 548C300 548 315 548 345 548C455 548 485 548 525 548C745 548 795 548 835 548C1180 548 1200 548 1248 548C1500 548 1520 548 1578 548C1690 548 1765 548 1830 548" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="10 12" opacity=".82"/>
+
+  <!-- sources as three unequal circular signals -->
+  <g filter="url(#shadow)"><circle cx="123" cy="388" r="69" fill="#fff" stroke="#73a4c6" stroke-width="2.5"/><circle cx="198" cy="537" r="57" fill="#e8f4fb" stroke="#73a4c6" stroke-width="2.5"/><circle cx="116" cy="681" r="61" fill="#fff" stroke="#73a4c6" stroke-width="2.5"/></g>
+  <path d="M90 370h66M90 390h50M90 410h58" stroke="#347cab" stroke-width="4" stroke-linecap="round"/><text x="123" y="474" class="body">新闻网站</text>
+  <path d="M171 533q27-38 54 0q-27 35-54 0z" fill="none" stroke="#347cab" stroke-width="4"/><circle cx="198" cy="530" r="7" fill="#347cab"/><text x="198" y="620" class="body">微博</text>
+  <circle cx="96" cy="670" r="10" fill="#347cab"/><circle cx="135" cy="650" r="10" fill="#347cab"/><circle cx="139" cy="692" r="10" fill="#347cab"/><path d="M104 665l23-12M105 676l25 12" stroke="#347cab" stroke-width="4"/><text x="116" y="765" class="body">社交平台</text>
+  <path d="M184 418Q258 450 330 530M255 537H330M177 670Q260 640 330 565" class="edge"/>
+
+  <!-- crawler collector turbine -->
+  <g transform="translate(407 548)" filter="url(#shadow)">
+    <circle r="100" fill="#fff" stroke="#4f8db7" stroke-width="3"/><circle r="72" fill="#e1eff9" stroke="#6b9dbc" stroke-width="2"/><circle r="26" fill="#1c689b"/>
+    <path d="M0-62q37 5 53 31L22-13Q12-6 10-1zM54 31q-23 29-53 31L10 2q5-8 12-15zM-54 31q-14-34 1-62l43 33q2 9 10 15z" fill="#4e91bd" opacity=".86"/>
+  </g>
+  <text x="407" y="690" class="head">Crawler</text><text x="407" y="720" class="body">采集 · 清洗 · 去重</text>
+
+  <!-- NLP processing orbit -->
+  <g transform="translate(650 548)">
+    <ellipse rx="120" ry="175" fill="#fff" stroke="#76a4c5" stroke-width="2.5" filter="url(#shadow)"/>
+    <ellipse rx="78" ry="118" fill="#e5f2fa" stroke="#8fb4cc" stroke-width="2" stroke-dasharray="7 6"/>
+    <circle r="48" fill="url(#core)"/><text x="0" y="10" class="whiteHead">NLP</text>
+    <circle cy="-135" r="27" class="softNode"/><path d="M-12-142h24M-12-133h18" stroke="#2f78aa" stroke-width="3"/><text x="0" y="-184" class="tiny">文本清洗</text>
+    <circle cx="96" cy="-58" r="27" class="softNode"/><path d="M83-63h26M83-53h20" stroke="#2f78aa" stroke-width="3"/><text x="132" y="-55" class="tiny" text-anchor="start">关键词</text>
+    <circle cx="96" cy="74" r="27" class="softNode"/><path d="M83 71q13 15 26 0M88 64h1M103 64h1" stroke="#2f78aa" stroke-width="3" fill="none"/><text x="132" y="80" class="tiny" text-anchor="start">情感分析</text>
+    <circle cy="140" r="27" class="softNode"/><circle cx="-9" cy="135" r="4" fill="#2f78aa"/><circle cx="7" cy="129" r="4" fill="#2f78aa"/><circle cx="10" cy="145" r="4" fill="#2f78aa"/><path d="M-6 135l9-4M-5 137l11 6" class="thin"/><text x="0" y="191" class="tiny">Embedding</text>
+    <path d="M0-48V-108M43-21l31-20M43 21l31 36M0 48v65" class="dash"/>
+  </g>
+
+  <!-- central event understanding, dominant node -->
+  <circle cx="1010" cy="548" r="235" fill="url(#glow)"/>
+  <g filter="url(#coreShadow)">
+    <path d="M890 320h240l95 95v266l-95 95H890l-95-95V415z" fill="url(#core)" stroke="#0b3b61" stroke-width="4"/>
+    <path d="M915 360h190l75 75v226l-75 75H915l-75-75V435z" fill="none" stroke="#9bc9e5" stroke-width="2" opacity=".5"/>
+  </g>
+  <circle cx="1010" cy="548" r="88" fill="#fff" fill-opacity=".10" stroke="#b9dbef" stroke-width="2"/>
+  <circle cx="1010" cy="548" r="46" fill="#fff"/><path d="M987 548h46M1010 525v46" stroke="#176396" stroke-width="6" stroke-linecap="round"/>
+  <text x="1010" y="410" class="whiteHead">Event Aggregation</text><text x="1010" y="444" class="whiteBody">事件理解核心</text>
+  <g>
+    <circle cx="902" cy="502" r="47" fill="#fff" fill-opacity=".13" stroke="#b8dcef" stroke-width="2"/><text x="902" y="498" class="whiteBody">Event ID</text><text x="902" y="520" class="whiteBody">生成</text>
+    <circle cx="1118" cy="502" r="47" fill="#fff" fill-opacity=".13" stroke="#b8dcef" stroke-width="2"/><text x="1118" y="498" class="whiteBody">语义</text><text x="1118" y="520" class="whiteBody">匹配</text>
+    <circle cx="902" cy="626" r="47" fill="#fff" fill-opacity=".13" stroke="#b8dcef" stroke-width="2"/><text x="902" y="622" class="whiteBody">事件</text><text x="902" y="644" class="whiteBody">指纹</text>
+    <circle cx="1118" cy="626" r="47" fill="#fff" fill-opacity=".13" stroke="#b8dcef" stroke-width="2"/><text x="1118" y="622" class="whiteBody">时间</text><text x="1118" y="644" class="whiteBody">约束</text>
+    <path d="M964 530l20 8M1056 538l20-8M964 606l20-8M1056 598l20 8" stroke="#b8dcef" stroke-width="2"/>
+  </g>
+  <text x="1010" y="820" class="head" style="font-size:20px">从“相似文本”到“同一事件”</text>
+
+  <!-- event analysis fan -->
+  <path d="M1225 548h45" class="edge"/>
+  <g transform="translate(1368 548)">
+    <circle r="45" fill="#1b689b" filter="url(#shadow)"/><path d="M-17 4l12-12 12 8 14-20" fill="none" stroke="#fff" stroke-width="4"/><text x="0" y="74" class="head">事件分析</text>
+    <path d="M0-45V-150M43-13l92-62M43 14l92 70M0 45v150" class="thin"/>
+    <g transform="translate(0 -185)"><circle r="48" class="node"/><path d="M-22 13h44M-15 0h30M-7-13h14" stroke="#337ba9" stroke-width="5" stroke-linecap="round"/><text x="0" y="75" class="tiny">热度</text></g>
+    <g transform="translate(150 -100)"><circle r="48" class="node"/><path d="M-22 0a22 22 0 1 0 44 0a22 22 0 1 0-44 0M0-20V2l14 10" fill="none" stroke="#337ba9" stroke-width="4"/><text x="0" y="75" class="tiny">生命周期</text></g>
+    <g transform="translate(150 120)"><circle r="48" class="node"/><path d="M-20-22h40v44h-40zM-11-10h22M-11 0h22M-11 10h15" fill="none" stroke="#337ba9" stroke-width="4"/><text x="0" y="75" class="tiny">AI Report</text></g>
+    <g transform="translate(0 210)"><circle r="48" class="node"/><path d="M-21 0l13 14 29-33" fill="none" stroke="#337ba9" stroke-width="5"/><text x="0" y="75" class="tiny">Verify</text></g>
+  </g>
+
+  <!-- user application as three screens, connected by output stream -->
+  <path d="M1548 548h56" class="edge"/>
+  <g filter="url(#shadow)">
+    <path d="M1608 337q0-18 18-18h190q18 0 18 18v118q0 18-18 18h-190q-18 0-18-18z" fill="#fff" stroke="#6e9dbd" stroke-width="2.5"/><path d="M1634 357h72v70h-72zM1722 357h86M1722 384h68M1722 411h78" fill="none" stroke="#347cab" stroke-width="4"/><text x="1721" y="505" class="head">Dashboard</text>
+    <path d="M1585 544q0-18 18-18h226q18 0 18 18v132q0 18-18 18h-226q-18 0-18-18z" fill="#e7f3fb" stroke="#568db3" stroke-width="2.5"/><circle cx="1640" cy="595" r="30" fill="none" stroke="#347cab" stroke-width="4"/><path d="M1692 567h120M1692 596h92M1618 650h194" stroke="#347cab" stroke-width="4"/><text x="1716" y="729" class="head">事件详情</text>
+    <path d="M1625 787q0-18 18-18h160q18 0 18 18v88q0 18-18 18h-70l-30 28v-28h-60q-18 0-18-18z" fill="#fff" stroke="#6e9dbd" stroke-width="2.5"/><circle cx="1671" cy="831" r="8" fill="#347cab"/><circle cx="1711" cy="831" r="8" fill="#347cab"/><circle cx="1751" cy="831" r="8" fill="#347cab"/><text x="1723" y="955" class="head">智能问答</text>
+  </g>
+
+  <!-- lifecycle caption -->
+  <line x1="76" y1="1017" x2="1844" y2="1017" stroke="#b5cbdb" stroke-width="2"/>
+  <circle cx="688" cy="1017" r="6" fill="#3d83b2"/><circle cx="1010" cy="1017" r="9" fill="#145b88"/><circle cx="1332" cy="1017" r="6" fill="#3d83b2"/>
+  <text x="960" y="1053" class="body">RAW NEWS  →  STRUCTURED SIGNALS  →  EVENT KNOWLEDGE  →  INTELLIGENT INSIGHT</text>
+</svg>

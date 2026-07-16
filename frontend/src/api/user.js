@@ -64,18 +64,28 @@ export async function registerUser(payload) {
 }
 
 export async function saveUserProfile(payload) {
+  const persistedPayload = {
+    keywords: Array.isArray(payload?.keywords) ? payload.keywords : [],
+    platforms: Array.isArray(payload?.platforms) ? payload.platforms : [],
+    filterEnabled: payload?.filterEnabled === true,
+  }
+  const apiPayload = {
+    keywords: persistedPayload.keywords,
+    platforms: persistedPayload.platforms,
+  }
+
   if (USE_MOCK) {
     await wait(300)
-    localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(payload))
+    localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(persistedPayload))
     return { success: true }
   }
 
   const response = await request('/api/user/preferences', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify(apiPayload),
   })
 
   const result = response?.data ?? response
-  localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(payload))
+  localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(persistedPayload))
   return result
 }

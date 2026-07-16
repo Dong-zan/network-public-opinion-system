@@ -1,7 +1,21 @@
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 from app.llm.base import LLMProviderConfigurationError
+
+
+_DOTENV_PATH = Path(__file__).resolve().parents[2] / ".env"
+
+
+def _load_environment(dotenv_path: Path = _DOTENV_PATH) -> None:
+    """Load local development settings without overriding the process environment."""
+    load_dotenv(dotenv_path=dotenv_path, override=False)
+
+
+_load_environment()
 
 
 def _positive_int(name: str, default: int) -> int:

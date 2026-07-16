@@ -1,10 +1,11 @@
 import logging
+import time
 
 from fastapi import APIRouter, BackgroundTasks, Depends
 
 from sqlalchemy.orm import Session
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from backend_app.database import SessionLocal, get_db
 
@@ -18,6 +19,41 @@ from backend_app.services.nlp_client import NLPClient
 
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_publish_time(value) -> datetime | None:
+    """将接口时间值转换为MySQL DATETIME；乱码或非法值降级为None。"""
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            parsed = None
+            for date_format in (
+                "%Y-%m-%d %H:%M:%S",
+                "%Y-%m-%d %H:%M",
+                "%Y/%m/%d %H:%M:%S",
+                "%Y/%m/%d %H:%M",
+            ):
+                try:
+                    parsed = datetime.strptime(text, date_format)
+                    break
+                except ValueError:
+                    continue
+            if parsed is None:
+                return None
+
+    if not 1000 <= parsed.year <= 9999:
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
 
 
 def analyze_article_in_background(news_id: int):
@@ -87,55 +123,58 @@ def receive_article(
 
 ):
 
+    request_started_at = time.perf_counter()
+
+    def log_elapsed(step: str):
+        elapsed_ms = (time.perf_counter() - request_started_at) * 1000
+        logger.info(
+            "[ARTICLE_DEBUG] step=%s elapsed=%.3f ms",
+            step,
+            elapsed_ms,
+        )
+
+    log_elapsed("request_enter")
+
     news_ids = []
 
 
-    for item in data:
-
-        article = Article(
-
-            title=item.title,
-
-            content=item.content,
-
-            source=item.source,
-
-            url=item.url,
-
-            platform=item.platform,
-
-            author=item.author,
-
-            account_id=item.account_id,
-
-            account_name=item.account_name,
-
-            account_type=item.account_type,
-
-            is_official=item.is_official,
-
-            repost_count=item.repost_count,
-
-            comment_count=item.comment_count,
-
-            like_count=item.like_count,
-
-            crawl_time=datetime.now(),
-
-            publish_time=item.publish_time
-        )
-
-
-        db.add(article)
-
-        db.flush()
-
-
-        news_ids.append(article.news_id)
-
-
-
-    db.commit()
+    for index, item in enumerate(data):
+        try:
+            article = Article(
+                title=item.title,
+                content=item.content,
+                source=item.source,
+                url=item.url,
+                platform=item.platform,
+                author=item.author,
+                account_id=item.account_id,
+                account_name=item.account_name,
+                account_type=item.account_type,
+                is_official=item.is_official,
+                repost_count=item.repost_count,
+                comment_count=item.comment_count,
+                like_count=item.like_count,
+                crawl_time=datetime.now(),
+                publish_time=normalize_publish_time(item.publish_time),
+            )
+            db.add(article)
+            log_elapsed("db_add_after")
+            log_elapsed("db_flush_start")
+            db.flush()
+            log_elapsed("db_flush_end")
+            news_id = article.news_id
+            log_elapsed("db_commit_start")
+            db.commit()
+            log_elapsed("db_commit_end")
+            news_ids.append(news_id)
+        except Exception as exc:
+            db.rollback()
+            logger.warning(
+                "Skip invalid crawler article index=%s url=%r error=%s",
+                index,
+                item.url,
+                exc,
+            )
 
 
     for news_id in news_ids:
@@ -145,6 +184,8 @@ def receive_article(
             news_id,
         )
 
+
+    log_elapsed("before_return")
 
     return {
 

@@ -10,6 +10,7 @@ from backend_app.models.ai_result import AIResult
 from backend_app.models.event_heat_history import EventHeatHistory
 from backend_app.models.article_verification import ArticleVerification
 from backend_app.services.ai_provider import AIProviderError, RealAIProvider
+from backend_app.services.verification_assessment import enrich_verification_result
 
 
 
@@ -283,7 +284,17 @@ class AIService:
 
                         "platform":
 
-                            article.platform or ""
+                            article.platform or "",
+
+                        "author": article.author or "",
+
+                        "account_id": article.account_id or "",
+
+                        "account_name": article.account_name or "",
+
+                        "account_type": article.account_type or "",
+
+                        "is_official": bool(article.is_official),
 
                     }
 
@@ -469,6 +480,11 @@ class AIService:
 
         result = self.provider.verify(
             context
+        )
+
+        result = enrich_verification_result(
+            result,
+            context,
         )
 
 

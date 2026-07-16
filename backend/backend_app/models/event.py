@@ -31,6 +31,12 @@ class Event(Base):
     )
 
 
+    event_name=Column(
+        String(20),
+        nullable=True
+    )
+
+
     summary=Column(
         Text
     )

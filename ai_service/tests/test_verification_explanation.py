@@ -623,6 +623,8 @@ def test_explanation_prompt_omits_source_authentication_state() -> None:
     assert "本地来源注册表" not in prompt
     assert '"source_role": "government_notice"' in prompt
     assert '"is_official_input": true' in prompt
+    assert "来源覆盖、核心事实一致性、未发现明显冲突和多来源交叉印证" in prompt
+    assert "支持因素、来源情况、一致性判断、限制因素" in prompt
 
 
 def test_display_uses_generic_scope_limitations_without_registry_text() -> None:
