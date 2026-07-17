@@ -44,6 +44,7 @@ debug_html/
 .vscode/
 .DS_Store
 Thumbs.db
+~$*
 
 # Local integration files with environment-specific endpoints
 backend/test_ai.py
