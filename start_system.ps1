@@ -133,7 +133,7 @@ $packageManagerPath = $packageManagerCommand.Source.Replace("'", "''")
 Start-ServiceWindow `
     -Title "Public Opinion - Frontend (5173)" `
     -WorkingDirectory $frontendDirectory `
-    -Command "& '$packageManagerPath' run dev"
+    -Command "& '$packageManagerPath' run dev -- --host 127.0.0.1 --port 5173 --strictPort"
 
 Write-Host "AI, NLP, backend, and frontend service windows have been opened."
 Write-Host "Frontend: http://127.0.0.1:5173"
